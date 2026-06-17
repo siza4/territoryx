@@ -835,6 +835,9 @@ header{
 .upload-preview{width:100%;max-height:120px;object-fit:cover;border-radius:3px;margin-top:10px;display:none}
 .upload-specs{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);margin-top:8px;line-height:1.6}
 
+
+#resetBtn:disabled{background:rgba(255,255,255,0.1);color:var(--muted);cursor:not-allowed}
+
 </style>
 </head>
 <body>
@@ -3545,6 +3548,7 @@ function openAuthModal()  { document.getElementById('authModal').classList.add('
 
 // ─── AUTH TAB SWITCHING ───
 function switchAuthTab(tab) {
+  clearAuthError();
   document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   ['signin','signup','forgot'].forEach(p => {
     const el = document.getElementById('authPanel-' + p);
@@ -3601,23 +3605,49 @@ async function signInEmail() {
   if (!_sb) { showToast('Supabase not configured — running in demo mode', 'war'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const pass  = document.getElementById('authPassword').value;
-  if (!email || !pass) { showToast('Enter email and password', 'err'); return; }
+  if (!email || !pass) { showAuthError('Enter email and password'); return; }
+
+  clearAuthError();
   const { data, error } = await _sb.auth.signInWithPassword({ email, password: pass });
   if (error) {
-    if (error.message.includes('Email not confirmed')) {
-      showToast('Email not confirmed. Check your inbox or resend below.', 'war');
-      document.getElementById('confirmBanner').style.display = 'block';
-      switchAuthTab('signup');
+    if (error.message.includes('Email not confirmed') || error.message.includes('not confirmed')) {
+      showAuthError('Email not confirmed. Check your inbox or click resend below.', true);
+    } else if (error.message.includes('Invalid login')) {
+      showAuthError('Invalid email or password. Try again.');
     } else {
-      showToast(error.message, 'err');
+      showAuthError(error.message);
     }
   } else {
     currentUser = data.user;
-    showToast('✓ Signed in — welcome to the War Room', 'success');
+    clearAuthError();
     closeModal('authModal');
+    showToast('✓ Signed in — welcome to the War Room', 'success');
     updateAuthUI();
     renderAll();
   }
+}
+
+function showAuthError(msg, showResend = false) {
+  const errDiv = document.getElementById('signinError');
+  const errText = document.getElementById('signinErrorText');
+  const resendBtn = document.getElementById('signinResendBtn');
+  if (errDiv) errDiv.style.display = 'block';
+  if (errText) errText.textContent = msg;
+  if (resendBtn) resendBtn.style.display = showResend ? 'inline-block' : 'none';
+}
+
+function clearAuthError() {
+  const errDiv = document.getElementById('signinError');
+  if (errDiv) errDiv.style.display = 'none';
+}
+
+async function resendFromSignin() {
+  const email = document.getElementById('authEmail').value.trim();
+  if (!email) { showAuthError('Enter your email first'); return; }
+  if (!_sb) return;
+  const { error } = await _sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: window.location.origin + window.location.pathname } });
+  if (error) showAuthError(error.message);
+  else showAuthError('✓ Confirmation email resent. Check your inbox.', false);
 }
 
 async function signUpEmail() {
@@ -3629,11 +3659,12 @@ async function signUpEmail() {
   if (!email || !pass || !company) { showToast('Email, password and company name are required', 'err'); return; }
   if (pass !== confirm) { showToast('Passwords do not match', 'err'); return; }
   if (!validatePassword(pass)) { showToast('Password does not meet requirements', 'err'); return; }
+  const redirectUrl = window.location.origin + window.location.pathname;
   const { data, error } = await _sb.auth.signUp({
     email, password: pass,
     options: {
       data: { company_name: company, role: 'user' },
-      emailRedirectTo: window.location.origin + window.location.pathname
+      emailRedirectTo: redirectUrl
     }
   });
   if (error) showToast(error.message, 'err');
@@ -3656,7 +3687,8 @@ async function sendPasswordReset() {
   if (!_sb) { showToast('Supabase not configured', 'err'); return; }
   const email = document.getElementById('authEmailReset').value.trim();
   if (!email) { showToast('Enter your email', 'err'); return; }
-  const { error } = await _sb.auth.resetPasswordForEmail(email, { redirectTo: location.href });
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { error } = await _sb.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
   if (error) showToast(error.message, 'err');
   else { showToast('✓ Reset link sent — check your email', 'success'); switchAuthTab('signin'); }
 }
@@ -3671,8 +3703,105 @@ async function signOut() {
   if (!_sb) { showToast('Not signed in', 'info'); return; }
   await _sb.auth.signOut();
   currentUser = null;
+  // Clear all user-specific state so next user doesn't see old data
+  creditAccount = null;
+  myBids = [];
+  invoices = [];
+  notifications = [];
+  Storage.set('creditAccount', null);
+  Storage.set('myBids', []);
+  Storage.set('invoices', []);
+  Storage.set('notifications', []);
   showToast('Signed out', 'info');
   setTimeout(() => location.reload(), 400);
+}
+
+// ─── PASSWORD RECOVERY HANDLER ───
+// Detects Supabase recovery token in URL and opens reset modal
+let _recoverySession = null;
+
+function handlePasswordRecovery() {
+  const hash = window.location.hash;
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get('type');
+
+  // Check URL hash for access_token (Supabase sends this)
+  if (hash.includes('access_token=') || hash.includes('type=recovery')) {
+    const hashParams = new URLSearchParams(hash.substring(1));
+    const accessToken = hashParams.get('access_token');
+    const refreshToken = hashParams.get('refresh_token');
+
+    if (accessToken) {
+      // Exchange the token for a session
+      _sb.auth.exchangeCodeForSession(accessToken).then(({ data, error }) => {
+        if (error) {
+          showToast('Password reset link expired or invalid', 'err');
+          return;
+        }
+        _recoverySession = data.session;
+        // Clear the hash from URL
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        // Open reset modal
+        document.getElementById('resetPasswordModal').classList.add('active');
+      });
+    }
+  }
+}
+
+function validateResetPassword() {
+  const pass = document.getElementById('resetPassword').value;
+  const hint = document.getElementById('resetPassHint');
+  const hasNum = /\d/.test(pass);
+  const hasSym = /[!@#$%^&*(),.?":{}|<>]/.test(pass);
+  const ok = pass.length >= 8 && hasNum && hasSym;
+  if (hint) {
+    hint.className = ok ? 'form-hint ok' : pass.length > 0 ? 'form-hint warn' : 'form-hint';
+    hint.textContent = ok ? '✓ Strong password' : 'Use 8+ characters with a number and symbol';
+  }
+  checkResetPasswordsMatch();
+  return ok;
+}
+
+function checkResetPasswordsMatch() {
+  const pass = document.getElementById('resetPassword').value;
+  const confirm = document.getElementById('resetPasswordConfirm').value;
+  const hint = document.getElementById('resetConfirmHint');
+  const btn = document.getElementById('resetBtn');
+
+  if (!hint || !btn) return;
+
+  if (confirm.length === 0) {
+    hint.className = 'form-hint';
+    hint.textContent = 'Repeat your password';
+    btn.disabled = true;
+  } else if (pass === confirm && validateResetPassword()) {
+    hint.className = 'form-hint ok';
+    hint.textContent = '✓ Passwords match';
+    btn.disabled = false;
+  } else {
+    hint.className = 'form-hint warn';
+    hint.textContent = '✗ Passwords do not match or too weak';
+    btn.disabled = true;
+  }
+}
+
+async function submitNewPassword() {
+  const pass = document.getElementById('resetPassword').value;
+  if (!validateResetPassword()) { showToast('Password does not meet requirements', 'err'); return; }
+
+  if (!_sb) { showToast('Supabase not configured', 'err'); return; }
+
+  const { data, error } = await _sb.auth.updateUser({ password: pass });
+  if (error) {
+    showToast('Failed to update password: ' + error.message, 'err');
+  } else {
+    closeModal('resetPasswordModal');
+    showToast('✓ Password updated — sign in with your new password', 'success');
+    // Sign out any existing session to force re-login
+    await _sb.auth.signOut();
+    currentUser = null;
+    updateAuthUI();
+  }
 }
 
 // ─── INIT ───
@@ -3683,6 +3812,7 @@ renderAll();         // Render default immediately so page isn't blank
 detectLocation();
 checkOrientation();
 updateHeaderStats();
+handlePasswordRecovery(); // Check for reset token in URL
 
 window.addEventListener('resize', () => {
   if (window.innerWidth >= 768) {
@@ -3823,6 +3953,10 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
         <button class="auth-tab" data-tab="signup" onclick="switchAuthTab('signup')">CREATE ACCOUNT</button>
       </div>
       <div id="authPanel-signin">
+        <div id="signinError" style="display:none;padding:10px 12px;background:rgba(239,68,68,0.08);border:1px solid var(--red);border-radius:3px;margin-bottom:14px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--red)" id="signinErrorText"></div>
+          <button class="auth-link" id="signinResendBtn" style="display:none;margin-top:6px" onclick="resendFromSignin()">Resend confirmation email</button>
+        </div>
         <div class="form-group">
           <label class="form-label">Business Email</label>
           <input class="form-input" id="authEmail" type="email" placeholder="you@company.com" autocomplete="email"/>
@@ -4052,6 +4186,32 @@ serve(async (req) => {
 
 ═══════════════════════════════════════════════════════════════════════════════
 -->
+
+<!-- PASSWORD RESET MODAL — Handles recovery token from email -->
+<div class="modal-overlay" id="resetPasswordModal" onclick="modalOverlayClick(event,'resetPasswordModal')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <div class="modal-title">SET NEW PASSWORD</div>
+      <button class="modal-close" onclick="closeModal('resetPasswordModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-family:'Inter',sans-serif;font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:16px">
+        Enter your new password below.
+      </p>
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <input class="form-input" id="resetPassword" type="password" placeholder="Min 8 characters" oninput="validateResetPassword()"/>
+        <div class="form-hint" id="resetPassHint">Use 8+ characters with a number and symbol</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm New Password</label>
+        <input class="form-input" id="resetPasswordConfirm" type="password" placeholder="Repeat password" oninput="checkResetPasswordsMatch()"/>
+        <div class="form-hint" id="resetConfirmHint">Repeat your password</div>
+      </div>
+      <button class="btn btn-primary" style="width:100%" id="resetBtn" onclick="submitNewPassword()" disabled>UPDATE PASSWORD</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
