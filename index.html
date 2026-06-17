@@ -6,6 +6,67 @@
 <title>TerritoryX — Zero Capital Edition</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://d3js.org/d3.v7.min.js">
+
+// ─── BILLBOARD UPLOAD — Winner Uploads Their Creative ───
+async function uploadBillboard(territoryId, file) {
+  if (!territoryId || !file) return;
+  const t = TERRITORIES[territoryId];
+  if (!t) return;
+  const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  const maxSize = 5 * 1024 * 1024;
+  if (!validTypes.includes(file.type)) { showToast('Use JPG, PNG, or WebP only', 'err'); return; }
+  if (file.size > maxSize) { showToast('Max 5MB per file', 'err'); return; }
+  const dimCheck = await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.width, h: img.height, ok: img.width >= 1280 && img.height >= 720 });
+    img.onerror = () => resolve({ ok: false });
+    img.src = URL.createObjectURL(file);
+  });
+  if (!dimCheck.ok) { showToast('Min 1280x720px required', 'err'); return; }
+  showToast('Uploading billboard...', 'info');
+  if (_sb) {
+    try {
+      const path = `${territoryId}/${epochData.number}/${Date.now()}_${file.name}`;
+      const { data, error } = await _sb.storage.from('billboards').upload(path, file, { cacheControl: '3600', upsert: true });
+      if (error) throw error;
+      const { data: urlData } = _sb.storage.from('billboards').getPublicUrl(path);
+      const publicUrl = urlData.publicUrl;
+      t.imgL = publicUrl; t.imgP = publicUrl;
+      await DB.saveTerritory(territoryId);
+      if (current === territoryId) {
+        triggerTakeover(t.color, publicUrl);
+        setTimeout(() => renderAll(), 1500);
+      }
+      showToast('✓ Billboard uploaded and live', 'success');
+      return;
+    } catch (e) {
+      console.warn('Storage upload failed, falling back to local:', e.message);
+    }
+  }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const base64 = ev.target.result;
+    t.imgL = base64; t.imgP = base64;
+    Storage.set('territory_' + territoryId + '_billboard', base64);
+    if (current === territoryId) {
+      triggerTakeover(t.color, base64);
+      setTimeout(() => renderAll(), 1500);
+    }
+    showToast('✓ Billboard saved locally (Storage unavailable)', 'war');
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleBillboardDrop(e, territoryId) {
+  e.preventDefault(); e.stopPropagation();
+  const zone = e.currentTarget;
+  zone.classList.remove('dragover');
+  const files = e.dataTransfer.files;
+  if (files.length) uploadBillboard(territoryId, files[0]);
+}
+function handleBillboardDrag(e) { e.preventDefault(); e.currentTarget.classList.add('dragover'); }
+function handleBillboardDragLeave(e) { e.currentTarget.classList.remove('dragover'); }
+
 /*
 ═══════════════════════════════════════════════════════════════════════════════
 REQUIRED SUPABASE RLS POLICIES — Run this in your Supabase SQL Editor
@@ -730,6 +791,50 @@ header{
   border-radius:50%;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;
   color:#fff;display:flex;align-items:center;justify-content:center;border:2px solid var(--panel)
 }
+
+/* ── AUTH MODAL ── */
+.auth-tabs{display:flex;gap:2px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:2px}
+.auth-tab{flex:1;padding:8px 10px;background:transparent;border:none;border-radius:2px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;text-align:center}
+.auth-tab:hover{color:var(--text);background:rgba(0,242,254,0.04)}
+.auth-tab.active{color:var(--cyan);background:rgba(0,242,254,0.08);border-bottom:1px solid var(--cyan)}
+.auth-link{background:none;border:none;color:var(--cyan);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;padding:0;text-decoration:underline;transition:color .15s}
+.auth-link:hover{color:#5DFFFE}
+#passHint{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);margin-top:4px;transition:color .2s}
+#passHint.warn{color:var(--red)}
+#passHint.ok{color:var(--green)}
+#confirmBanner{display:none}
+
+/* ═══ CINEMATIC TAKEOVER V2 ═══ */
+.takeover-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:50;transition:none}
+.takeover-flash.active{animation:flashV2 .6s ease-out}
+@keyframes flashV2{0%{opacity:0}15%{opacity:.95}40%{opacity:.3}60%{opacity:.8}100%{opacity:0}}
+.billboard-scanlines{transition:opacity .3s}
+.takeover-active .billboard-scanlines{opacity:.85}
+.burst-overlay{position:absolute;inset:0;z-index:8;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 50%, var(--burst-color) 0%, transparent 70%);transition:none}
+.burst-overlay.active{animation:burstIn .8s ease-out}
+@keyframes burstIn{0%{opacity:0;transform:scale(0.5)}30%{opacity:.6;transform:scale(1.2)}60%{opacity:.3;transform:scale(1)}100%{opacity:0;transform:scale(1.5)}}
+.takeover-stamp{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(3) rotate(-15deg);z-index:60;pointer-events:none;opacity:0;font-family:'IBM Plex Mono',monospace;font-size:clamp(24px,6vw,64px);font-weight:800;letter-spacing:.2em;color:var(--stamp-color);text-transform:uppercase;text-shadow:0 0 20px var(--stamp-color),0 0 40px var(--stamp-color);border:4px solid var(--stamp-color);padding:12px 28px;border-radius:4px;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)}
+.takeover-stamp.active{animation:stampSlam .7s cubic-bezier(0.34,1.56,0.64,1) forwards}
+@keyframes stampSlam{0%{opacity:0;transform:translate(-50%,-50%) scale(4) rotate(-25deg)}50%{opacity:1;transform:translate(-50%,-50%) scale(0.9) rotate(-12deg)}70%{transform:translate(-50%,-50%) scale(1.05) rotate(-16deg)}100%{opacity:0;transform:translate(-50%,-50%) scale(1) rotate(-15deg)}}
+.territory-name.charging{animation:heartbeat .8s ease-in-out infinite}
+@keyframes heartbeat{0%,100%{transform:scale(1);text-shadow:0 2px 20px rgba(0,0,0,0.6)}50%{transform:scale(1.03);text-shadow:0 2px 30px rgba(0,0,0,0.8),0 0 60px var(--brand-glow)}}
+.glitch-text.v2::before,.glitch-text.v2::after{content:attr(data-text);position:absolute;left:0;right:0;top:0;opacity:0;pointer-events:none}
+.glitch-text.v2.active::before{animation:glitchV2a .4s ease-out;opacity:.9}
+.glitch-text.v2.active::after{animation:glitchV2b .4s ease-out;opacity:.9}
+@keyframes glitchV2a{0%{clip-path:inset(10% 0 70% 0);transform:translateX(-6px);color:#0ff}25%{clip-path:inset(70% 0 10% 0);transform:translateX(6px);color:#f0f}50%{clip-path:inset(30% 0 40% 0);transform:translateX(-3px);color:#0ff}75%{clip-path:inset(50% 0 20% 0);transform:translateX(3px);color:#f0f}100%{clip-path:inset(40% 0 40% 0);transform:translateX(0);opacity:0}}
+@keyframes glitchV2b{0%{clip-path:inset(70% 0 10% 0);transform:translateX(6px);color:#f0f}25%{clip-path:inset(10% 0 70% 0);transform:translateX(-6px);color:#0ff}50%{clip-path:inset(50% 0 20% 0);transform:translateX(3px);color:#f0f}75%{clip-path:inset(30% 0 40% 0);transform:translateX(-3px);color:#0ff}100%{clip-path:inset(40% 0 40% 0);transform:translateX(0);opacity:0}}
+.billboard-img{transition:opacity .4s ease,transform 8s ease}
+.billboard-img.swapping{opacity:0;transform:scale(1.08)}
+
+/* ── BILLBOARD UPLOAD ── */
+.upload-zone{border:2px dashed var(--border);border-radius:4px;padding:20px;text-align:center;transition:all .2s;cursor:pointer;background:rgba(0,242,254,0.02)}
+.upload-zone:hover{border-color:var(--cyan);background:rgba(0,242,254,0.06)}
+.upload-zone.dragover{border-color:var(--cyan);background:rgba(0,242,254,0.08)}
+.upload-zone-text{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);line-height:1.6}
+.upload-zone-text strong{color:var(--text);font-weight:600}
+.upload-preview{width:100%;max-height:120px;object-fit:cover;border-radius:3px;margin-top:10px;display:none}
+.upload-specs{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);margin-top:8px;line-height:1.6}
+
 </style>
 </head>
 <body>
@@ -869,14 +974,18 @@ header{
   </div>
 </div>
 
-<!-- ADMIN PANEL MODAL -->
+<!-- ADMIN PANEL MODAL — Full System Control -->
 <div class="modal-overlay" id="adminModal" onclick="modalOverlayClick(event,'adminModal')">
-  <div class="modal" style="max-width:600px">
+  <div class="modal" style="max-width:720px">
     <div class="modal-head">
-      <div class="modal-title">TERRITORYX ADMIN</div>
+      <div class="modal-title">TERRITORYX ADMIN — SYSTEM CONTROL</div>
       <button class="modal-close" onclick="closeModal('adminModal')">×</button>
     </div>
     <div class="modal-body">
+      <div id="adminStatusBanner" style="padding:10px 14px;border-radius:3px;border:1px solid var(--border);margin-bottom:16px;background:rgba(0,242,254,0.04);display:flex;align-items:center;gap:10px">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulseDot 1.4s infinite"></div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted)">System operational · Admin override active</div>
+      </div>
       <div class="admin-grid">
         <div class="admin-card" onclick="adminSettleEpoch()">
           <div class="admin-card-label">Settle Epoch</div>
@@ -894,11 +1003,48 @@ header{
           <div class="admin-card-label">Reset All Data</div>
           <div class="admin-card-val red">CLEAR</div>
         </div>
+        <div class="admin-card" onclick="adminForceSync()">
+          <div class="admin-card-label">Force Sync</div>
+          <div class="admin-card-val purple">PUSH</div>
+        </div>
+        <div class="admin-card" onclick="adminToggleDemo()">
+          <div class="admin-card-label">Demo Mode</div>
+          <div class="admin-card-val" id="demoModeVal">OFF</div>
+        </div>
+      </div>
+      <div class="section-title">Credit Applications</div>
+      <div id="adminCreditApps" style="margin-bottom:14px">
+        <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">Loading applications...</div>
+      </div>
+      <div class="section-title">User Management</div>
+      <div style="margin-bottom:14px">
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input class="form-input" id="adminUserEmail" type="email" placeholder="user@company.com" style="flex:1"/>
+          <select class="form-select" id="adminUserRole" style="width:140px">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+            <option value="suspended">Suspended</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="adminSetUserRole()">SET ROLE</button>
+        </div>
+        <div class="inv-list" id="adminUserList" style="max-height:200px;overflow-y:auto">
+          <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">Loading users...</div>
+        </div>
+      </div>
+      <div class="section-title">Territory Override</div>
+      <div style="margin-bottom:14px">
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <select class="form-select" id="adminTerritorySelect" style="flex:1"></select>
+          <input class="form-input" id="adminTerritoryBrand" type="text" placeholder="Brand name" style="width:160px"/>
+          <input class="form-input" id="adminTerritoryBid" type="text" placeholder="Bid $" style="width:120px"/>
+          <button class="btn btn-primary btn-sm" onclick="adminOverrideTerritory()">OVERRIDE</button>
+        </div>
       </div>
       <div class="section-title">Data Management</div>
       <div class="export-row">
         <button class="btn btn-secondary btn-sm" onclick="exportData()">EXPORT JSON</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importFile').click()">IMPORT JSON</button>
+        <button class="btn btn-secondary btn-sm" onclick="adminDownloadSQL()">DOWNLOAD SQL</button>
         <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(event)"/>
       </div>
       <div class="section-title">All Invoices</div>
@@ -957,6 +1103,8 @@ header{
   <div class="billboard-vignette"></div>
   <div class="billboard-gradient-overlay"></div>
   <div class="takeover-flash" id="takeoverFlash"></div>
+  <div class="burst-overlay" id="burstOverlay"></div>
+  <div class="takeover-stamp" id="takeoverStamp">TAKEN OVER</div>
 
   <div class="billboard-content" id="billboardContent">
     <div class="detect-pulse" id="detectPulse"><span>Detecting location</span></div>
@@ -964,6 +1112,7 @@ header{
     <div class="location-meta-row">
       <div class="location-meta" id="locationMeta"><span class="lm-dot"></span><span id="locationMetaText">Nearest to your location</span></div>
       <div class="explore-link" id="exploreLink" onclick="openExplorer()">Not your area? Explore manually →</div>
+      <div class="explore-link" id="recalibrateLink" onclick="recalibrateLocation()" style="display:none">↻ Recalibrate location</div>
     </div>
     <div class="territory-name glitch-text" id="billboardTerritory" data-text="JOHANNESBURG">JOHANNESBURG</div>
     <div class="owned-by">Owned By</div>
@@ -1127,6 +1276,18 @@ header{
 // 50+ SADC Cities · All Critical Bugs Fixed
 // ══════════════════════════════════════════════
 
+// ─── CURRENCY CONFIG ───
+// All financial values are stored/calculated in integer USD cents (1/100 of a dollar).
+const CURRENCY = { BASE_UNIT: 'cents', DISPLAY: '$', CODE: 'USD' };
+const toCents   = (dollars) => Math.round(dollars * 100);
+const fromCents = (cents)   => cents / 100;
+const fmtMoney  = (cents)   => {
+  const n = fromCents(cents);
+  if (n >= 1000000) return '$' + (n/1000000).toFixed(2) + 'M';
+  if (n >= 1000)    return '$' + Math.round(n/1000) + 'K';
+  return '$' + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+};
+
 // ─── CONFIG ───
 const CONFIG = {
   EPOCH_DURATION_DAYS: 7,
@@ -1158,17 +1319,7 @@ const SUPABASE_URL  = 'https://scrriozadylyedwpgisl.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjcnJpb3phZHlseWVkd3BnaXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2Mjg0MDcsImV4cCI6MjA5NzIwNDQwN30.o6ZJwygZbvL1gwoWnYfHcJg--ZnBN_Cu9uoXfkr3Pb0';
 const _sb = (typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON) : null;
 
-// ─── CURRENCY CONFIG ───
-// All financial values are stored/calculated in integer USD cents (1/100 of a dollar).
-const CURRENCY = { BASE_UNIT: 'cents', DISPLAY: '$', CODE: 'USD' };
-const toCents   = (dollars) => Math.round(dollars * 100);
-const fromCents = (cents)   => cents / 100;
-const fmtMoney  = (cents)   => {
-  const n = fromCents(cents);
-  if (n >= 1000000) return '$' + (n/1000000).toFixed(2) + 'M';
-  if (n >= 1000)    return '$' + Math.round(n/1000) + 'K';
-  return '$' + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-};
+// ─── CURRENCY CONFIG (moved above CONFIG) ───
 
 // ─── AUTHENTICATION — Supabase Auth (Email / Google OAuth) ───
 let currentUser = null;
@@ -1380,10 +1531,17 @@ const DB = {
       data.forEach(row => {
         if (!TERRITORIES[row.id]) return;
         const t = TERRITORIES[row.id];
-        t.bid = row.bid ?? t.bid; t.brand = row.brand ?? t.brand; t.color = row.color ?? t.color;
-        t.tagline = row.tagline ?? t.tagline; t.threat = row.threat ?? t.threat;
-        t.ownDays = row.own_days ?? t.ownDays; t.sudden = row.sudden ?? t.sudden;
-        t.history = row.history ?? t.history; t.challengers = row.challengers ?? t.challengers;
+        t.bid = row.bid ?? t.bid;
+        t.brand = row.brand ?? t.brand;
+        t.color = row.color ?? t.color;
+        t.tagline = row.tagline ?? t.tagline;
+        t.threat = row.threat ?? t.threat;
+        t.ownDays = row.own_days ?? t.ownDays;
+        t.sudden = row.sudden ?? t.sudden;
+        t.history = row.history ?? t.history;
+        t.challengers = row.challengers ?? t.challengers;
+        t.imgL = row.billboard_url ?? t.imgL;
+        t.imgP = row.billboard_mobile_url ?? t.imgP;
       });
     } catch(e) { console.warn('DB.loadTerritories', e); }
   },
@@ -1394,7 +1552,8 @@ const DB = {
       await _sb.from('territories').upsert({
         id, bid: t.bid, brand: t.brand, color: t.color, tagline: t.tagline,
         threat: t.threat, own_days: t.ownDays, sudden: t.sudden,
-        history: t.history, challengers: t.challengers
+        history: t.history, challengers: t.challengers,
+        billboard_url: t.imgL, billboard_mobile_url: t.imgP
       }, { onConflict: 'id' });
     } catch(e) { console.warn('DB.saveTerritory', e); }
   },
@@ -1580,7 +1739,7 @@ function updateCreditPreview() {
     const limit = calculateCreditLimit({ revenue, years });
     const cpAmt = document.getElementById('cpAmount');
     const cpPrev = document.getElementById('creditPreview');
-    if (cpAmt) cpAmt.textContent = '$' + (limit/1000).toFixed(0) + 'K';
+    if (cpAmt) cpAmt.textContent = fmtMoney(limit);
     if (cpPrev) cpPrev.style.display = 'block';
   }
 }
@@ -1608,24 +1767,199 @@ function submitCreditApplication() {
     showToast('Complete all required fields', 'err'); return;
   }
 
-  const limit = calculateCreditLimit({ revenue, years });
+  const estimatedLimit = calculateCreditLimit({ revenue, years });
 
+  // Create application with PENDING status — requires admin review
   creditAccount = {
-    status: 'ACTIVE',
-    limit: limit,
+    status: 'PENDING',
+    limit: 0,              // No credit until approved
     used: 0,
-    available: limit,
+    available: 0,
+    estimatedLimit: estimatedLimit,  // What they applied for
     companyProfile: { company, reg, country, revenue, years, employees, website, email },
     paymentHistory: [],
     invoices: [],
-    createdAt: Date.now()
+    applicationId: 'ca_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+    createdAt: Date.now(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null
   };
 
+  // Save to localStorage + Supabase
   Storage.set('creditAccount', creditAccount);
-  DB.saveCreditAccount(creditAccount);  // sync to Supabase
+  DB.saveCreditAccount(creditAccount);
+
+  // Try to send admin notification via Edge Function
+  notifyAdminNewApplication(creditAccount);
+
   closeModal('creditModal');
-  showToast('✓ CREDIT APPROVED — $' + (limit/1000).toFixed(0) + 'K limit', 'success');
+  showToast('✓ APPLICATION SUBMITTED — Under review. You will be notified.', 'success');
   renderAll();
+}
+
+// ─── ADMIN CREDIT REVIEW — Approve or Reject Applications ───
+async function adminReviewCredit(applicationId, action, approvedLimit = 0, reason = '') {
+  if (!isAdmin()) { showToast('Admin only', 'err'); return; }
+  if (!creditAccount || creditAccount.applicationId !== applicationId) {
+    showToast('Application not found', 'err'); return;
+  }
+
+  if (action === 'approve') {
+    creditAccount.status = 'ACTIVE';
+    creditAccount.limit = approvedLimit > 0 ? approvedLimit : creditAccount.estimatedLimit;
+    creditAccount.available = creditAccount.limit;
+    creditAccount.reviewedAt = Date.now();
+    creditAccount.reviewedBy = getUserId();
+    creditAccount.rejectionReason = null;
+    Storage.set('creditAccount', creditAccount);
+    DB.saveCreditAccount(creditAccount);
+    notifyUserCreditApproved(creditAccount);
+    showToast('✓ Credit approved — ' + fmtMoney(creditAccount.limit), 'success');
+  } else if (action === 'reject') {
+    creditAccount.status = 'REJECTED';
+    creditAccount.limit = 0;
+    creditAccount.available = 0;
+    creditAccount.reviewedAt = Date.now();
+    creditAccount.reviewedBy = getUserId();
+    creditAccount.rejectionReason = reason || 'Application did not meet criteria';
+    Storage.set('creditAccount', creditAccount);
+    DB.saveCreditAccount(creditAccount);
+    notifyUserCreditRejected(creditAccount);
+    showToast('Application rejected', 'war');
+  }
+  renderAll();
+}
+
+// ─── NOTIFICATION SYSTEM ───
+let notifications = Storage.get('notifications', []);
+
+function addNotification({ type, title, message, read = false }) {
+  const notif = {
+    id: 'notif_' + Date.now(),
+    type, title, message,
+    read,
+    timestamp: Date.now()
+  };
+  notifications.unshift(notif);
+  Storage.set('notifications', notifications);
+  updateNotifBadge();
+}
+
+function updateNotifBadge() {
+  const unread = notifications.filter(n => !n.read).length;
+  const pill = document.getElementById('creditPill');
+  if (!pill) return;
+  // Add badge to credit pill if there are unread notifications
+  let badge = pill.querySelector('.notif-badge');
+  if (unread > 0) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.className = 'notif-badge';
+      pill.style.position = 'relative';
+      pill.appendChild(badge);
+    }
+    badge.textContent = unread > 9 ? '9+' : unread;
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+function markNotifRead(id) {
+  const n = notifications.find(x => x.id === id);
+  if (n) { n.read = true; Storage.set('notifications', notifications); updateNotifBadge(); }
+}
+
+function markAllNotifRead() {
+  notifications.forEach(n => n.read = true);
+  Storage.set('notifications', notifications);
+  updateNotifBadge();
+}
+
+// ─── EMAIL NOTIFICATIONS (via Edge Function or fallback) ───
+async function notifyAdminNewApplication(ca) {
+  if (!_sb) return;
+  try {
+    await _sb.functions.invoke('notify-admin', {
+      body: {
+        type: 'new_credit_application',
+        applicationId: ca.applicationId,
+        company: ca.companyProfile.company,
+        email: ca.companyProfile.email,
+        estimatedLimit: ca.estimatedLimit,
+        timestamp: ca.createdAt
+      }
+    });
+  } catch (e) {
+    console.warn('Admin notification failed:', e.message);
+  }
+  // Also add in-app notification for admin if they're online
+  if (isAdmin()) {
+    addNotification({
+      type: 'credit',
+      title: 'New Credit Application',
+      message: `${ca.companyProfile.company} applied for ${fmtMoney(ca.estimatedLimit)}`,
+      read: false
+    });
+  }
+}
+
+async function notifyUserCreditApproved(ca) {
+  addNotification({
+    type: 'success',
+    title: 'Credit Approved',
+    message: `Your credit limit of ${fmtMoney(ca.limit)} is now active. Start bidding.`,
+    read: false
+  });
+  if (!_sb) return;
+  try {
+    await _sb.functions.invoke('notify-user', {
+      body: {
+        type: 'credit_approved',
+        to: ca.companyProfile.email,
+        company: ca.companyProfile.company,
+        limit: ca.limit
+      }
+    });
+  } catch (e) {
+    console.warn('User email notification failed:', e.message);
+  }
+}
+
+async function notifyUserCreditRejected(ca) {
+  addNotification({
+    type: 'err',
+    title: 'Credit Application Rejected',
+    message: ca.rejectionReason || 'Your application did not meet our criteria.',
+    read: false
+  });
+  if (!_sb) return;
+  try {
+    await _sb.functions.invoke('notify-user', {
+      body: {
+        type: 'credit_rejected',
+        to: ca.companyProfile.email,
+        company: ca.companyProfile.company,
+        reason: ca.rejectionReason
+      }
+    });
+  } catch (e) {
+    console.warn('User email notification failed:', e.message);
+  }
+}
+
+// ─── REAPPLY AFTER REJECTION ───
+function reapplyCredit() {
+  if (!creditAccount || creditAccount.status !== 'REJECTED') {
+    showToast('No rejected application to reapply', 'err'); return;
+  }
+  // Reset to allow new application
+  creditAccount = null;
+  Storage.set('creditAccount', null);
+  DB.saveCreditAccount(null);
+  showToast('You may now submit a new application', 'success');
+  renderAll();
+  openCreditModal();
 }
 
 function updateCreditDisplay() {
@@ -1641,13 +1975,51 @@ function updateCreditDisplay() {
     return;
   }
 
-  const avail = creditAccount.available;   // cents
-  const limit = creditAccount.limit;       // cents
+  // ── PENDING STATE ──
+  if (creditAccount.status === 'PENDING') {
+    if (display) { display.textContent = 'PENDING'; display.className = 'cp-val'; display.style.color = 'var(--gold)'; }
+    if (bar) bar.style.display = 'none';
+    if (prompt) {
+      prompt.style.display = 'block';
+      prompt.innerHTML = `
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gold);margin-bottom:8px">⏳ APPLICATION UNDER REVIEW</div>
+        <div style="font-family:'Inter',sans-serif;font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:8px">
+          Estimated limit: <strong style="color:var(--text)">${fmtMoney(creditAccount.estimatedLimit)}</strong><br>
+          Submitted: ${new Date(creditAccount.createdAt).toLocaleDateString()}<br>
+          You will be notified via email and in-app when approved.
+        </div>
+      `;
+    }
+    return;
+  }
+
+  // ── REJECTED STATE ──
+  if (creditAccount.status === 'REJECTED') {
+    if (display) { display.textContent = 'REJECTED'; display.className = 'cp-val'; display.style.color = 'var(--red)'; }
+    if (bar) bar.style.display = 'none';
+    if (prompt) {
+      prompt.style.display = 'block';
+      prompt.innerHTML = `
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--red);margin-bottom:8px">✗ APPLICATION REJECTED</div>
+        <div style="font-family:'Inter',sans-serif;font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:8px">
+          Reason: ${creditAccount.rejectionReason || 'Did not meet criteria'}<br>
+          Reviewed: ${creditAccount.reviewedAt ? new Date(creditAccount.reviewedAt).toLocaleDateString() : 'N/A'}
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="reapplyCredit()">REAPPLY</button>
+      `;
+    }
+    return;
+  }
+
+  // ── ACTIVE STATE ──
+  const avail = creditAccount.available;
+  const limit = creditAccount.limit;
   const pct = limit > 0 ? ((limit - avail) / limit * 100) : 0;
 
   if (display) {
     display.textContent = fmtMoney(avail);
     display.className = avail < limit * 0.2 ? 'cp-val warn' : 'cp-val ok';
+    display.style.color = '';
   }
 
   if (bar) {
@@ -1684,14 +2056,14 @@ function placeBid() {
   const t = TERRITORIES[current];
 
   if (!amt || amt <= t.bid) {
-    showToast('Bid must exceed $' + t.bid.toLocaleString(), 'err'); return;
+    showToast('Bid must exceed ' + fmtMoney(t.bid), 'err'); return;
   }
 
   const tollBuffer = Math.floor(amt * CONFIG.PLATFORM_TOLL_RATE);
   const totalRequired = amt + tollBuffer;
 
   if (creditAccount.available < totalRequired) {
-    showToast('Insufficient credit. Available: $' + creditAccount.available.toLocaleString(), 'err'); return;
+    showToast('Insufficient credit. Available: ' + fmtMoney(creditAccount.available), 'err'); return;
   }
 
   // Release previous bid credit on this territory if any
@@ -1736,7 +2108,7 @@ function placeBid() {
 
   triggerTakeover('#00F2FE');
   setTimeout(() => renderAll(), 200);
-  showToast('✓ BID PLACED — $' + amt.toLocaleString() + ' on ' + t.city, 'success');
+  showToast('✓ BID PLACED — ' + fmtMoney(amt) + ' on ' + t.city, 'success');
   document.getElementById('bidInput').value = '';
 
   // Update epoch volume
@@ -2076,7 +2448,7 @@ function renderAll() {
 
     const yourActive = myBids.filter(b => b.territoryId === current).sort((a,b) => b.timestamp - a.timestamp);
     yourBidsEl.innerHTML = yourActive.map(b =>
-      `<div class="bh-row"><div class="bh-left"><div class="bh-dot" style="background:${b.status==='OUTBID'?'#EF4444':b.status==='EXPIRED'?'#F59E0B':'#00F2FE'}"></div><div><div class="bh-co">${creditAccount?.companyProfile?.company || 'You'}</div><div class="bh-time">${b.status} · ${new Date(b.timestamp).toLocaleTimeString()}</div></div></div><div class="bh-amt">$${b.amount.toLocaleString()}</div></div>`
+      `<div class="bh-row"><div class="bh-left"><div class="bh-dot" style="background:${b.status==='OUTBID'?'#EF4444':b.status==='EXPIRED'?'#F59E0B':'#00F2FE'}"></div><div><div class="bh-co">${creditAccount?.companyProfile?.company || 'You'}</div><div class="bh-time">${b.status} · ${new Date(b.timestamp).toLocaleTimeString()}</div></div></div><div class="bh-amt">${fmtMoney(b.amount)}</div></div>`
     ).join('') || '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:6px 0">No bids on this territory</div>';
   }
 
@@ -2106,18 +2478,40 @@ function renderAll() {
   // FIX: Single binding — no inline onclick conflict
   if (bidBtn) {
     bidBtn.onclick = null;
-    if (!creditAccount || creditAccount.status !== 'ACTIVE') {
+    if (!creditAccount) {
       bidBtn.className = 'bid-btn';
       bidBtn.textContent = 'APPLY CREDIT';
       bidBtn.onclick = openCreditModal;
-    } else if (t.sudden) {
+    } else if (creditAccount.status === 'PENDING') {
+      bidBtn.className = 'bid-btn';
+      bidBtn.textContent = 'PENDING REVIEW';
+      bidBtn.disabled = true;
+      bidBtn.style.opacity = '0.5';
+      bidBtn.style.cursor = 'not-allowed';
+    } else if (creditAccount.status === 'REJECTED') {
       bidBtn.className = 'bid-btn danger';
-      bidBtn.textContent = 'COUNTER';
-      bidBtn.onclick = placeBid;
+      bidBtn.textContent = 'REAPPLY';
+      bidBtn.onclick = reapplyCredit;
+      bidBtn.disabled = false;
+      bidBtn.style.opacity = '1';
+      bidBtn.style.cursor = 'pointer';
+    } else if (creditAccount.status === 'ACTIVE') {
+      bidBtn.disabled = false;
+      bidBtn.style.opacity = '1';
+      bidBtn.style.cursor = 'pointer';
+      if (t.sudden) {
+        bidBtn.className = 'bid-btn danger';
+        bidBtn.textContent = 'COUNTER';
+        bidBtn.onclick = placeBid;
+      } else {
+        bidBtn.className = 'bid-btn';
+        bidBtn.textContent = 'BID NOW';
+        bidBtn.onclick = placeBid;
+      }
     } else {
       bidBtn.className = 'bid-btn';
-      bidBtn.textContent = 'BID NOW';
-      bidBtn.onclick = placeBid;
+      bidBtn.textContent = 'APPLY CREDIT';
+      bidBtn.onclick = openCreditModal;
     }
   }
 
@@ -2126,8 +2520,14 @@ function renderAll() {
     if (!creditAccount) {
       balSpan.textContent = 'APPLY';
       balSpan.style.color = 'var(--red)';
+    } else if (creditAccount.status === 'PENDING') {
+      balSpan.textContent = 'PENDING';
+      balSpan.style.color = 'var(--gold)';
+    } else if (creditAccount.status === 'REJECTED') {
+      balSpan.textContent = 'REJECTED';
+      balSpan.style.color = 'var(--red)';
     } else {
-      balSpan.textContent = '$' + (creditAccount.available/1000).toFixed(0) + 'K';
+      balSpan.textContent = fmtMoney(creditAccount.available);
       balSpan.style.color = 'var(--gold)';
     }
   }
@@ -2179,7 +2579,7 @@ function renderInvoices() {
           <div class="inv-num">${inv.invoiceNumber}</div>
           <div class="inv-meta">${inv.territoryName} · Due ${due} · ${inv.epochId}</div>
         </div>
-        <div class="inv-amt">$${(inv.total/1000).toFixed(0)}K</div>
+        <div class="inv-amt">${fmtMoney(inv.total)}</div>
         <div class="inv-status ${statusClass}">${inv.status}</div>
       </div>
     `;
@@ -2217,16 +2617,37 @@ function showInvoiceDetail(invId) {
         <thead><tr><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
           ${inv.lineItems.map(li => `
-            <tr><td>${li.description}${li.period ? `<br><span style="font-size:9px;color:var(--muted)">${li.period}</span>` : ''}</td><td style="text-align:center">${li.quantity}</td><td style="text-align:right">$${li.amount.toLocaleString()}</td></tr>
+            <tr><td>${li.description}${li.period ? `<br><span style="font-size:9px;color:var(--muted)">${li.period}</span>` : ''}</td><td style="text-align:center">${li.quantity}</td><td style="text-align:right">${fmtMoney(li.amount)}</td></tr>
           `).join('')}
         </tbody>
-        <tr class="inv-total-row"><td colspan="2">TOTAL</td><td>$${inv.total.toLocaleString()}</td></tr>
-        ${inv.balanceDue > 0 ? `<tr><td colspan="2" style="color:var(--muted)">BALANCE DUE</td><td style="color:var(--red);font-weight:700">$${inv.balanceDue.toLocaleString()}</td></tr>` : ''}
+        <tr class="inv-total-row"><td colspan="2">TOTAL</td><td>${fmtMoney(inv.total)}</td></tr>
+        ${inv.balanceDue > 0 ? `<tr><td colspan="2" style="color:var(--muted)">BALANCE DUE</td><td style="color:var(--red);font-weight:700">${fmtMoney(inv.balanceDue)}</td></tr>` : ''}
       </table>
       <div class="inv-actions">
         ${inv.status !== 'PAID' ? `<button class="btn btn-primary" onclick="markInvoicePaid('${inv._id}');closeModal('invoiceModal')">MARK AS PAID (TEST)</button>` : ''}
         <button class="btn btn-secondary" onclick="downloadInvoicePDF('${inv._id}')">DOWNLOAD PDF</button>
       </div>
+      ${inv.status === 'PAID' ? `
+      <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+        <div class="section-title" style="margin-bottom:10px">UPLOAD BILLBOARD</div>
+        <div class="upload-zone" id="uploadZone"
+             ondragover="handleBillboardDrag(event)"
+             ondragleave="handleBillboardDragLeave(event)"
+             ondrop="handleBillboardDrop(event, '${inv.territoryId}')"
+             onclick="document.getElementById('billboardFile').click()">
+          <div class="upload-zone-text">
+            <strong>Drop your billboard here</strong> or click to browse<br>
+            <span style="font-size:9px">Landscape 1920×1080 · Portrait 1080×1920 · JPG/PNG/WebP · Max 5MB</span>
+          </div>
+          <img class="upload-preview" id="uploadPreview" alt="Preview"/>
+          <div class="upload-specs">
+            Safe zone: keep logos & text within center 60%×70%<br>
+            Use the Safe Zone toggle in the top-right to preview
+          </div>
+          <input type="file" id="billboardFile" style="display:none" accept="image/jpeg,image/png,image/webp"
+                 onchange="uploadBillboard('${inv.territoryId}', this.files[0])"/>
+        </div>
+      </div>` : ''}
     </div>
   `;
 
@@ -2255,8 +2676,8 @@ EPOCH: ${epochData.name}
 LINE ITEMS:
 ${inv.lineItems.map(li => `${li.description}: $${li.amount.toLocaleString()}`).join('\n')}
 
-TOTAL: $${inv.total.toLocaleString()}
-BALANCE DUE: $${inv.balanceDue.toLocaleString()}
+TOTAL: ${fmtMoney(inv.total)}
+BALANCE DUE: ${fmtMoney(inv.balanceDue)}
 
 PAYMENT:
 Bank: First National Bank
@@ -2290,7 +2711,7 @@ function showAdminPanel() {
       return `
         <div class="inv-row" onclick="showInvoiceDetail('${inv._id}')">
           <div class="inv-left"><div class="inv-num">${inv.invoiceNumber}</div><div class="inv-meta">${inv.territoryName} · ${inv.billedTo.companyName}</div></div>
-          <div class="inv-amt">$${(inv.total/1000).toFixed(0)}K</div>
+          <div class="inv-amt">${fmtMoney(inv.total)}</div>
           <div class="inv-status ${statusClass}">${inv.status}</div>
         </div>
       `;
@@ -2301,10 +2722,10 @@ function showAdminPanel() {
   const adminLate = document.getElementById('adminLate');
   const adminTotal = document.getElementById('adminTotal');
   const adminCollected = document.getElementById('adminCollected');
-  if (adminToll) adminToll.textContent = '$' + (revenue.toll/1000).toFixed(0) + 'K';
-  if (adminLate) adminLate.textContent = '$' + (revenue.late/1000).toFixed(0) + 'K';
-  if (adminTotal) adminTotal.textContent = '$' + (revenue.total/1000).toFixed(0) + 'K';
-  if (adminCollected) adminCollected.textContent = '$' + (revenue.collected/1000).toFixed(0) + 'K';
+  if (adminToll) adminToll.textContent = fmtMoney(revenue.toll);
+  if (adminLate) adminLate.textContent = fmtMoney(revenue.late);
+  if (adminTotal) adminTotal.textContent = fmtMoney(revenue.total);
+  if (adminCollected) adminCollected.textContent = fmtMoney(revenue.collected);
 
   document.getElementById('adminModal').classList.add('active');
 }
@@ -2362,6 +2783,179 @@ function adminResetData() {
   }
 }
 
+// ─── ADMIN USER MANAGEMENT ───
+// NOTE: listUsers requires an Edge Function with service_role key.
+// Deploy: supabase functions new admin-users
+// See EDGE FUNCTION TEMPLATE at bottom of this file.
+
+async function adminLoadUsers() {
+  const list = document.getElementById('adminUserList');
+  if (!list) return;
+  list.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">Loading users...</div>';
+  try {
+    const { data, error } = await _sb.functions.invoke('admin-users', { body: { action: 'list' } });
+    if (error) throw error;
+    if (data && data.users) { adminRenderUsers(data.users); return; }
+  } catch (e) {
+    console.warn('Edge Function failed, falling back to local:', e.message);
+  }
+  const localUsers = [];
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith('tx_creditAccount')) {
+      try {
+        const ca = JSON.parse(localStorage.getItem(k));
+        if (ca && ca.companyProfile) {
+          localUsers.push({
+            id: k.replace('tx_creditAccount', '').replace(/"/g, '') || 'local',
+            email: ca.companyProfile.email || 'unknown',
+            company_name: ca.companyProfile.company || 'Unknown',
+            role: 'user',
+            created_at: ca.createdAt
+          });
+        }
+      } catch(e) {}
+    }
+  });
+  adminRenderUsers(localUsers);
+}
+
+function adminLoadCreditApplications() {
+  const container = document.getElementById('adminCreditApps');
+  if (!container) return;
+
+  // In a real system, this would query all credit_accounts with status PENDING
+  // For now, show the current user's application if pending, plus demo data
+  const apps = [];
+  if (creditAccount && creditAccount.status === 'PENDING') {
+    apps.push(creditAccount);
+  }
+  // Also check localStorage for other applications (demo mode)
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith('tx_creditAccount')) {
+      try {
+        const ca = JSON.parse(localStorage.getItem(k));
+        if (ca && ca.status === 'PENDING' && ca.applicationId !== (creditAccount?.applicationId)) {
+          apps.push(ca);
+        }
+      } catch(e) {}
+    }
+  });
+
+  if (!apps.length) {
+    container.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">No pending applications</div>';
+    return;
+  }
+
+  container.innerHTML = apps.map(app => `
+    <div style="padding:12px;background:rgba(0,242,254,0.03);border:1px solid var(--border);border-radius:3px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div style="font-family:IBM Plex Mono;font-size:11px;font-weight:600;color:var(--text)">${app.companyProfile.company}</div>
+          <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--muted)">${app.companyProfile.email} · ${app.companyProfile.country}</div>
+        </div>
+        <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold)">${fmtMoney(app.estimatedLimit)}</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <div style="flex:1;font-family:IBM Plex Mono;font-size:8px;color:var(--muted);line-height:1.6">
+          Reg: ${app.companyProfile.reg}<br>
+          Revenue: ${app.companyProfile.revenue} · Years: ${app.companyProfile.years}<br>
+          Employees: ${app.companyProfile.employees}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" type="text" id="approveLimit_${app.applicationId}" placeholder="Approved limit $" style="flex:1;font-size:10px;padding:5px 8px"/>
+        <button class="btn btn-primary btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'approve', toCents(parseFloat(document.getElementById('approveLimit_${app.applicationId}').value.replace(/[$,\s]/g, ''))))">APPROVE</button>
+        <button class="btn btn-danger btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'reject', 0, prompt('Rejection reason:') || '')">REJECT</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function adminRenderUsers(users) {
+  const list = document.getElementById('adminUserList');
+  if (!list) return;
+  if (!users || !users.length) {
+    list.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">No users found. Deploy the admin-users Edge Function to see all users.</div>';
+    return;
+  }
+  list.innerHTML = users.map(u => {
+    const roleColor = u.role === 'admin' ? 'var(--cyan)' : u.role === 'suspended' ? 'var(--red)' : 'var(--green)';
+    return `<div class="inv-row" style="cursor:default"><div class="inv-left"><div class="inv-num">${u.company_name || u.email || 'Unknown'}</div><div class="inv-meta">${u.email || ''} · ${new Date(u.created_at).toLocaleDateString()}</div></div><div class="inv-status" style="border:1px solid ${roleColor};color:${roleColor};background:transparent">${u.role || 'user'}</div></div>`;
+  }).join('');
+}
+
+async function adminSetUserRole() {
+  if (!isAdmin()) { showToast('Admin only', 'err'); return; }
+  const email = document.getElementById('adminUserEmail').value.trim();
+  const role = document.getElementById('adminUserRole').value;
+  if (!email) { showToast('Enter user email', 'err'); return; }
+  try {
+    const { data, error } = await _sb.functions.invoke('admin-users', { body: { action: 'setRole', email, role } });
+    if (error) throw error;
+    showToast('✓ Role updated', 'success');
+    adminLoadUsers();
+  } catch (e) {
+    showToast('Role update failed: ' + e.message, 'err');
+  }
+}
+
+function adminPopulateTerritorySelect() {
+  const sel = document.getElementById('adminTerritorySelect');
+  if (!sel) return;
+  sel.innerHTML = ORDER.map(id => {
+    const t = TERRITORIES[id];
+    return `<option value="${id}">${t.city}, ${t.country}</option>`;
+  }).join('');
+}
+
+function adminOverrideTerritory() {
+  if (!isAdmin()) { showToast('Admin only', 'err'); return; }
+  const id = document.getElementById('adminTerritorySelect').value;
+  const brand = document.getElementById('adminTerritoryBrand').value.trim();
+  const bidRaw = document.getElementById('adminTerritoryBid').value.replace(/[$,\s]/g, '');
+  const bid = toCents(parseFloat(bidRaw));
+  if (!id || !brand || !bid) { showToast('Fill all fields', 'err'); return; }
+  const t = TERRITORIES[id];
+  t.bid = bid; t.brand = brand; t.color = '#00F2FE'; t.ownDays = 1;
+  t.history.unshift({ co: 'ADMIN OVERRIDE', c: '#00F2FE', amt: fmtMoney(bid), t: 'just now' });
+  Storage.set('territories', TERRITORIES);
+  DB.saveTerritory(id);
+  triggerTakeover('#00F2FE');
+  showToast(`✓ ${t.city} overridden to ${brand}`, 'success');
+  renderAll();
+}
+
+function adminForceSync() {
+  if (!_sb) { showToast('Supabase offline', 'err'); return; }
+  ORDER.forEach(id => DB.saveTerritory(id));
+  DB.saveEpoch(epochData);
+  showToast('✓ All territories synced to Supabase', 'success');
+}
+
+let demoMode = false;
+function adminToggleDemo() {
+  demoMode = !demoMode;
+  const val = document.getElementById('demoModeVal');
+  if (val) { val.textContent = demoMode ? 'ON' : 'OFF'; val.style.color = demoMode ? 'var(--gold)' : 'var(--text)'; }
+  showToast(demoMode ? 'Demo mode ON — no real transactions' : 'Demo mode OFF', demoMode ? 'war' : 'success');
+}
+
+function adminDownloadSQL() {
+  const sql = `-- TerritoryX Backup SQL\n-- Generated: ${new Date().toISOString()}\n\n` +
+    ORDER.map(id => {
+      const t = TERRITORIES[id];
+      return `INSERT INTO territories (id, bid, brand, color, tagline, threat, own_days, sudden) VALUES ('${id}', ${t.bid}, '${t.brand}', '${t.color}', '${t.tagline}', ${t.threat}, ${t.ownDays}, ${t.sudden});`;
+    }).join('\n');
+  const blob = new Blob([sql], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `territoryx_backup_${new Date().toISOString().slice(0,10)}.sql`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('SQL backup downloaded', 'success');
+}
+
 // ─── DATA EXPORT / IMPORT ───
 function exportData() {
   const data = Storage.exportAll();
@@ -2402,18 +2996,51 @@ function switchTab(tab) {
 }
 
 // ─── TAKEOVER ANIMATION ───
-function triggerTakeover(color) {
+function triggerTakeover(color, newImageUrl = null) {
   const flash = document.getElementById('takeoverFlash');
-  const te = document.getElementById('billboardTerritory');
-  const be = document.getElementById('billboardBrand');
-  if (flash) flash.classList.add('active');
-  if (te) te.classList.add('active');
-  if (be) be.classList.add('active');
+  const burst = document.getElementById('burstOverlay');
+  const stamp = document.getElementById('takeoverStamp');
+  const terrEl = document.getElementById('billboardTerritory');
+  const brandEl = document.getElementById('billboardBrand');
+  const img = document.getElementById('billboardImg');
+  const bb = document.getElementById('billboard');
+  if (terrEl) terrEl.classList.add('charging');
+  if (bb) bb.classList.add('takeover-active');
+  setTimeout(() => { if (flash) flash.classList.add('active'); }, 200);
+  setTimeout(() => {
+    if (terrEl) { terrEl.classList.remove('charging'); terrEl.classList.add('v2', 'active'); }
+    if (brandEl) brandEl.classList.add('v2', 'active');
+  }, 400);
+  setTimeout(() => {
+    if (newImageUrl && img) {
+      img.classList.add('swapping');
+      setTimeout(() => {
+        img.src = newImageUrl;
+        img.onload = () => img.classList.remove('swapping');
+        img.onerror = () => {
+          img.style.display = 'none';
+          const layer = document.getElementById('imgLayer');
+          if (layer) layer.style.background = `radial-gradient(circle at 50% 50%, ${hexToRgba(color, 0.25)} 0%, transparent 70%)`;
+        };
+      }, 400);
+    }
+  }, 500);
+  setTimeout(() => {
+    if (burst) { burst.style.setProperty('--burst-color', hexToRgba(color, 0.6)); burst.classList.add('active'); }
+    const bg = document.getElementById('billboardBg');
+    if (bg) { bg.style.setProperty('--brand-glow', hexToRgba(color, 0.35)); bg.style.background = `radial-gradient(circle at 30% 50%, ${hexToRgba(color, 0.3)} 0%, transparent 60%)`; }
+  }, 800);
+  setTimeout(() => {
+    if (stamp) { stamp.style.setProperty('--stamp-color', color); stamp.classList.add('active'); }
+  }, 1000);
   setTimeout(() => {
     if (flash) flash.classList.remove('active');
-    if (te) te.classList.remove('active');
-    if (be) be.classList.remove('active');
-  }, 500);
+    if (burst) burst.classList.remove('active');
+    if (stamp) stamp.classList.remove('active');
+    if (terrEl) terrEl.classList.remove('v2', 'active');
+    if (brandEl) brandEl.classList.remove('v2', 'active');
+    if (bb) bb.classList.remove('takeover-active');
+  }, 1400);
 }
 
 // ─── SAFE ZONE ───
@@ -2718,6 +3345,7 @@ function updateLocationMetaUI() {
   const metaEl = document.getElementById('locationMeta');
   const textEl = document.getElementById('locationMetaText');
   const exploreEl = document.getElementById('exploreLink');
+  const recalEl = document.getElementById('recalibrateLink');
   if (!metaEl || !textEl) return;
 
   metaEl.classList.remove('fallback');
@@ -2736,6 +3364,7 @@ function updateLocationMetaUI() {
     metaEl.classList.remove('visible');
   }
   if (exploreEl) exploreEl.classList.add('visible');
+  if (recalEl) recalEl.classList.add('visible');
 }
 
 function selectManual(id) {
@@ -2756,16 +3385,18 @@ function dismissGeoNote() {
   if (note) note.classList.remove('visible');
 }
 
-async function detectLocation() {
+async function detectLocation(force = false) {
   const pulse = document.getElementById('detectPulse');
   if (pulse) pulse.classList.add('active');
 
-  const cached = Storage.get(GEO_CACHE_KEY, null);
-  if (cached && (Date.now() - cached.ts) < GEO_CACHE_MS && TERRITORIES[cached.id]) {
-    current = cached.id;
-    locationMeta = { mode: cached.mode, countryName: cached.countryName, distanceKm: cached.distanceKm };
-    finishDetection(pulse);
-    return;
+  if (!force) {
+    const cached = Storage.get(GEO_CACHE_KEY, null);
+    if (cached && (Date.now() - cached.ts) < GEO_CACHE_MS && TERRITORIES[cached.id]) {
+      current = cached.id;
+      locationMeta = { mode: cached.mode, countryName: cached.countryName, distanceKm: cached.distanceKm };
+      finishDetection(pulse);
+      return;
+    }
   }
 
   const geo = await fetchUserGeolocation();
@@ -2787,6 +3418,12 @@ async function detectLocation() {
   finishDetection(pulse);
 }
 
+function recalibrateLocation() {
+  Storage.set(GEO_CACHE_KEY, null);
+  showToast('Detecting your location...', 'info');
+  detectLocation(true);
+}
+
 function finishDetection(pulse) {
   if (pulse) pulse.classList.remove('active');
   renderAll();
@@ -2805,7 +3442,7 @@ setInterval(() => {
 
   const id = ids[Math.floor(Math.random() * ids.length)];
   const t = TERRITORIES[id];
-  const inc = Math.floor(Math.random() * 15 + 5) * 100000;  // $5K–$150K in cents
+  const inc = Math.floor(Math.random() * 15 + 5) * 100000;  // $5K–$20K in cents
   if (botCreditPool < inc) return;
 
   botCreditPool -= inc;
@@ -2842,41 +3479,118 @@ document.addEventListener('keydown', (e) => {
 // ─── AUTH OPERATIONS ───
 function openAuthModal()  { document.getElementById('authModal').classList.add('active'); }
 
+// ─── AUTH TAB SWITCHING ───
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  ['signin','signup','forgot'].forEach(p => {
+    const el = document.getElementById('authPanel-' + p);
+    if (el) el.style.display = p === tab ? 'block' : 'none';
+  });
+  const title = document.getElementById('authModalTitle');
+  if (title) {
+    title.textContent = tab === 'signin' ? 'WELCOME TO TERRITORYX' : tab === 'signup' ? 'CREATE YOUR ACCOUNT' : 'PASSWORD RESET';
+  }
+}
+function showForgotPassword() { switchAuthTab('forgot'); }
+function showTerms() { closeModal('authModal'); document.getElementById('termsModal').classList.add('active'); }
+function showPrivacy() { closeModal('authModal'); document.getElementById('privacyModal').classList.add('active'); }
+
+function validatePassword(pass) {
+  const hint = document.getElementById('passHint');
+  if (!hint) return pass.length >= 8;
+  const hasNum = /\d/.test(pass);
+  const hasSym = /[!@#$%^&*(),.?":{}|<>]/.test(pass);
+  const ok = pass.length >= 8 && hasNum && hasSym;
+  hint.className = ok ? 'form-hint ok' : pass.length > 0 ? 'form-hint warn' : 'form-hint';
+  hint.textContent = ok ? '✓ Strong password' : 'Use 8+ characters with a number and symbol';
+  return ok;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const passUp = document.getElementById('authPasswordUp');
+  if (passUp) passUp.addEventListener('input', (e) => validatePassword(e.target.value));
+});
+
 async function signInEmail() {
-  if (!_sb) { showToast('Supabase not configured', 'err'); return; }
+  if (!_sb) { showToast('Supabase not configured — running in demo mode', 'war'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const pass  = document.getElementById('authPassword').value;
   if (!email || !pass) { showToast('Enter email and password', 'err'); return; }
-  const { error } = await _sb.auth.signInWithPassword({ email, password: pass });
-  if (error) showToast(error.message, 'err');
-  else closeModal('authModal');
+  const { data, error } = await _sb.auth.signInWithPassword({ email, password: pass });
+  if (error) {
+    if (error.message.includes('Email not confirmed')) {
+      showToast('Email not confirmed. Check your inbox or resend below.', 'war');
+      document.getElementById('confirmBanner').style.display = 'block';
+      switchAuthTab('signup');
+    } else {
+      showToast(error.message, 'err');
+    }
+  } else {
+    currentUser = data.user;
+    showToast('✓ Signed in — welcome to the War Room', 'success');
+    closeModal('authModal');
+    updateAuthUI();
+    renderAll();
+  }
 }
 
 async function signUpEmail() {
-  if (!_sb) { showToast('Supabase not configured', 'err'); return; }
-  const email = document.getElementById('authEmail').value.trim();
-  const pass  = document.getElementById('authPassword').value;
-  if (!email || !pass || pass.length < 6) { showToast('Password must be 6+ chars', 'err'); return; }
-  const { error } = await _sb.auth.signUp({ email, password: pass });
+  if (!_sb) { showToast('Supabase not configured — running in demo mode', 'war'); return; }
+  const email = document.getElementById('authEmailUp').value.trim();
+  const pass  = document.getElementById('authPasswordUp').value;
+  const confirm = document.getElementById('authPasswordConfirm').value;
+  const company = document.getElementById('authCompany').value.trim();
+  if (!email || !pass || !company) { showToast('Email, password and company name are required', 'err'); return; }
+  if (pass !== confirm) { showToast('Passwords do not match', 'err'); return; }
+  if (!validatePassword(pass)) { showToast('Password does not meet requirements', 'err'); return; }
+  const { data, error } = await _sb.auth.signUp({
+    email, password: pass,
+    options: { data: { company_name: company, role: 'user' } }
+  });
   if (error) showToast(error.message, 'err');
-  else { showToast('Check email to confirm account', 'success'); closeModal('authModal'); }
+  else {
+    document.getElementById('confirmBanner').style.display = 'block';
+    showToast('✓ Account created — confirm your email to continue', 'success');
+  }
+}
+
+async function resendConfirmation() {
+  if (!_sb) return;
+  const email = document.getElementById('authEmailUp').value.trim() || document.getElementById('authEmail').value.trim();
+  if (!email) { showToast('Enter your email first', 'err'); return; }
+  const { error } = await _sb.auth.resend({ type: 'signup', email });
+  if (error) showToast(error.message, 'err');
+  else showToast('Confirmation email resent', 'success');
+}
+
+async function sendPasswordReset() {
+  if (!_sb) { showToast('Supabase not configured', 'err'); return; }
+  const email = document.getElementById('authEmailReset').value.trim();
+  if (!email) { showToast('Enter your email', 'err'); return; }
+  const { error } = await _sb.auth.resetPasswordForEmail(email, { redirectTo: location.href });
+  if (error) showToast(error.message, 'err');
+  else { showToast('✓ Reset link sent — check your email', 'success'); switchAuthTab('signin'); }
 }
 
 async function signInGoogle() {
-  if (!_sb) { showToast('Supabase not configured', 'err'); return; }
+  if (!_sb) { showToast('Supabase not configured — running in demo mode', 'war'); return; }
   const { error } = await _sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href } });
   if (error) showToast(error.message, 'err');
 }
 
 async function signOut() {
-  if (!_sb) return;
+  if (!_sb) { showToast('Not signed in', 'info'); return; }
   await _sb.auth.signOut();
+  currentUser = null;
+  showToast('Signed out', 'info');
+  setTimeout(() => location.reload(), 400);
 }
 
 // ─── INIT ───
 initEpoch();
 initStratMap();
 initAuth();          // Initialize Supabase Auth before any data ops
+renderAll();         // Render default immediately so page isn't blank
 detectLocation();
 checkOrientation();
 updateHeaderStats();
@@ -2934,6 +3648,7 @@ async function initSupabase() {
 async function seedSupabase() {
   if (!_sb) return;
   try {
+    // Seed territories
     const { data: existing } = await _sb.from('territories').select('id');
     const existingIds = new Set((existing || []).map(r => r.id));
     const toSeed = Object.keys(TERRITORIES).filter(id => !existingIds.has(id));
@@ -2942,11 +3657,23 @@ async function seedSupabase() {
         const t = TERRITORIES[id];
         return { id, bid: t.bid, brand: t.brand, color: t.color, tagline: t.tagline,
           threat: t.threat, own_days: t.ownDays, sudden: t.sudden,
-          history: t.history, challengers: t.challengers };
+          history: t.history, challengers: t.challengers,
+          billboard_url: t.imgL, billboard_mobile_url: t.imgP };
       });
       for (let i = 0; i < rows.length; i += 20) {
         await _sb.from('territories').insert(rows.slice(i, i + 20));
       }
+      console.log(`Seeded ${toSeed.length} territories into Supabase`);
+    }
+    // Seed initial epoch if none exists
+    const { data: epochExisting } = await _sb.from('epochs').select('number').limit(1).single();
+    if (!epochExisting) {
+      await _sb.from('epochs').insert({
+        number: epochData.number, name: epochData.name, status: epochData.status,
+        started_at: epochData.startedAt, ends_at: epochData.endsAt,
+        total_volume: epochData.totalVolume, platform_toll: epochData.platformToll
+      });
+      console.log('Seeded initial epoch into Supabase');
     }
   } catch(e) { console.warn('Seed error', e); }
 }
@@ -2994,33 +3721,247 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 
 </script>
 
-<!-- AUTH MODAL (Email + Google OAuth) -->
+<!-- AUTH MODAL — Production Grade -->
 <div class="modal-overlay" id="authModal" onclick="modalOverlayClick(event,'authModal')">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:440px">
     <div class="modal-head">
-      <div class="modal-title">SIGN IN / SIGN UP</div>
+      <div class="modal-title" id="authModalTitle">WELCOME TO TERRITORYX</div>
       <button class="modal-close" onclick="closeModal('authModal')">×</button>
     </div>
     <div class="modal-body">
-      <div id="authForm">
+      <div class="auth-tabs" id="authTabs">
+        <button class="auth-tab active" data-tab="signin" onclick="switchAuthTab('signin')">SIGN IN</button>
+        <button class="auth-tab" data-tab="signup" onclick="switchAuthTab('signup')">CREATE ACCOUNT</button>
+      </div>
+      <div id="authPanel-signin">
         <div class="form-group">
-          <label class="form-label">Email</label>
-          <input class="form-input" id="authEmail" type="email" placeholder="you@company.com"/>
+          <label class="form-label">Business Email</label>
+          <input class="form-input" id="authEmail" type="email" placeholder="you@company.com" autocomplete="email"/>
         </div>
         <div class="form-group">
           <label class="form-label">Password</label>
-          <input class="form-input" id="authPassword" type="password" placeholder="••••••••"/>
+          <input class="form-input" id="authPassword" type="password" placeholder="••••••••" autocomplete="current-password"/>
         </div>
-        <div style="display:flex;gap:10px;margin-top:16px">
-          <button class="btn btn-primary" style="flex:1" onclick="signInEmail()">SIGN IN</button>
-          <button class="btn btn-secondary" style="flex:1" onclick="signUpEmail()">SIGN UP</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted)">
+            <input type="checkbox" id="authRemember" style="accent-color:var(--cyan)"/> Remember me
+          </label>
+          <button class="auth-link" onclick="showForgotPassword()">Forgot password?</button>
         </div>
+        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="signInEmail()">SIGN IN TO WAR ROOM</button>
         <div style="text-align:center;margin:14px 0;font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.1em">OR</div>
-        <button class="btn btn-secondary" style="width:100%" onclick="signInGoogle()">CONTINUE WITH GOOGLE</button>
+        <button class="btn btn-secondary" style="width:100%" onclick="signInGoogle()">
+          <span style="display:inline-flex;align-items:center;gap:8px;justify-content:center">
+            <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            CONTINUE WITH GOOGLE
+          </span>
+        </button>
+      </div>
+      <div id="authPanel-signup" style="display:none">
+        <div class="form-group">
+          <label class="form-label">Business Email <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="authEmailUp" type="email" placeholder="you@company.com" autocomplete="email"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="authPasswordUp" type="password" placeholder="Min 8 characters" autocomplete="new-password"/>
+          <div class="form-hint" id="passHint">Use 8+ characters with a number and symbol</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm Password <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="authPasswordConfirm" type="password" placeholder="Repeat password" autocomplete="new-password"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Name <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="authCompany" type="text" placeholder="e.g. MTN Group Limited"/>
+        </div>
+        <div style="margin-bottom:16px;font-family:'Inter',sans-serif;font-size:11px;color:var(--muted);line-height:1.6">
+          By creating an account, you agree to our <a href="#" class="auth-link" onclick="showTerms()">Terms of Service</a> and <a href="#" class="auth-link" onclick="showPrivacy()">Privacy Policy</a>.
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="signUpEmail()">CREATE ACCOUNT</button>
+        <div id="confirmBanner" style="display:none;padding:10px;background:rgba(34,197,94,0.08);border:1px solid var(--green);border-radius:3px;margin-bottom:12px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--green)">✓ Check your email to confirm your account.</div>
+          <button class="auth-link" style="margin-top:6px;font-size:9px" onclick="resendConfirmation()">Resend confirmation</button>
+        </div>
+      </div>
+      <div id="authPanel-forgot" style="display:none">
+        <p style="font-family:'Inter',sans-serif;font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:16px">
+          Enter your business email and we'll send you a password reset link.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Business Email</label>
+          <input class="form-input" id="authEmailReset" type="email" placeholder="you@company.com"/>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="sendPasswordReset()">SEND RESET LINK</button>
+        <button class="auth-link" style="width:100%;text-align:center" onclick="switchAuthTab('signin')">← Back to sign in</button>
       </div>
     </div>
   </div>
 </div>
+
+<!-- TERMS MODAL -->
+<div class="modal-overlay" id="termsModal" onclick="modalOverlayClick(event,'termsModal')">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <div class="modal-title">TERMS OF SERVICE</div>
+      <button class="modal-close" onclick="closeModal('termsModal')">×</button>
+    </div>
+    <div class="modal-body" style="font-family:'Inter',sans-serif;font-size:12px;color:var(--muted);line-height:1.8;max-height:60vh;overflow-y:auto">
+      <p><strong style="color:var(--text)">1. Territory Ownership</strong><br>TerritoryX operates a credit-based auction system. Winning a territory does not confer permanent ownership. Ownership is valid for the current epoch only and must be renewed via bidding or payment of the epoch invoice.</p>
+      <p><strong style="color:var(--text)">2. Credit & Payments</strong><br>Credit limits are issued based on company profile and revenue estimates. All invoices must be paid within 30 days. Late payments incur a 1.5% fee and may result in account suspension after 14 days.</p>
+      <p><strong style="color:var(--text)">3. Billboard Content</strong><br>Uploaded billboards must not contain illegal, offensive, or copyrighted material without license. TerritoryX reserves the right to remove non-compliant content and forfeit the territory.</p>
+      <p><strong style="color:var(--text)">4. Platform Toll</strong><br>A 5% platform toll is applied to all winning bids. This is non-negotiable and included in the generated invoice.</p>
+      <p><strong style="color:var(--text)">5. Disputes</strong><br>All bidding disputes are resolved by the TerritoryX arbitration panel. Admin decisions are final.</p>
+      <p style="margin-top:16px;font-size:10px;color:var(--muted)">TerritoryX Africa Ltd · Last updated: June 2026</p>
+    </div>
+  </div>
+</div>
+
+<!-- PRIVACY MODAL -->
+<div class="modal-overlay" id="privacyModal" onclick="modalOverlayClick(event,'privacyModal')">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <div class="modal-title">PRIVACY POLICY</div>
+      <button class="modal-close" onclick="closeModal('privacyModal')">×</button>
+    </div>
+    <div class="modal-body" style="font-family:'Inter',sans-serif;font-size:12px;color:var(--muted);line-height:1.8;max-height:60vh;overflow-y:auto">
+      <p><strong style="color:var(--text)">1. Data Collection</strong><br>We collect your email, company profile, bidding history, and approximate IP-based location. We do not store precise GPS coordinates.</p>
+      <p><strong style="color:var(--text)">2. Use of Data</strong><br>Your data is used for credit assessment, territory allocation, invoicing, and platform analytics. We never sell your data to third parties.</p>
+      <p><strong style="color:var(--text)">3. Security</strong><br>All data is encrypted in transit (TLS 1.3) and at rest (AES-256). Access is controlled via Row-Level Security (RLS) enforced by Supabase.</p>
+      <p><strong style="color:var(--text)">4. Retention</strong><br>Account data is retained for 7 years per tax regulations. You may request deletion by contacting finance@territoryx.africa.</p>
+      <p style="margin-top:16px;font-size:10px;color:var(--muted)">TerritoryX Africa Ltd · Last updated: June 2026</p>
+    </div>
+  </div>
+</div>
+
+
+<!--
+═══════════════════════════════════════════════════════════════════════════════
+EDGE FUNCTION TEMPLATE: admin-users
+═══════════════════════════════════════════════════════════════════════════════
+
+Deploy this to Supabase so the admin panel can list/manage users.
+
+1. Install Supabase CLI:
+   npm install -g supabase
+
+2. Login:
+   supabase login
+
+3. Link your project:
+   supabase link --project-ref YOUR_PROJECT_REF
+
+4. Create the function:
+   supabase functions new admin-users
+
+5. Paste this into supabase/functions/admin-users/index.ts:
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+serve(async (req) => {
+  const { action, email, role } = await req.json()
+  const authHeader = req.headers.get('Authorization')
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { global: { headers: { Authorization: authHeader! } } }
+  )
+
+  // Verify caller is admin
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'admin') {
+    return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403 })
+  }
+
+  if (action === 'list') {
+    const { data, error } = await supabase.auth.admin.listUsers()
+    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+    const users = data.users.map(u => ({
+      id: u.id,
+      email: u.email,
+      company_name: u.user_metadata?.company_name || 'Unknown',
+      role: u.app_metadata?.role || 'user',
+      created_at: u.created_at
+    }))
+    return new Response(JSON.stringify({ users }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  if (action === 'setRole') {
+    const { data: userData } = await supabase.auth.admin.listUsers()
+    const target = userData.users.find(u => u.email === email)
+    if (!target) return new Response(JSON.stringify({ error: 'User not found' }), { status: 404 })
+    const { error } = await supabase.auth.admin.updateUserById(target.id, {
+      app_metadata: { ...target.app_metadata, role }
+    })
+    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+    return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400 })
+})
+
+6. Deploy:
+   supabase functions deploy admin-users
+
+7. Set service_role key in Supabase Dashboard → Edge Functions → Secrets:
+   SUPABASE_SERVICE_ROLE_KEY = your_service_role_key
+
+═══════════════════════════════════════════════════════════════════════════════
+-->
+
+
+<!--
+═══════════════════════════════════════════════════════════════════════════════
+EDGE FUNCTION TEMPLATE: notify-user + notify-admin (Email Notifications)
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Create the function:
+   supabase functions new notify-user
+
+2. Paste into supabase/functions/notify-user/index.ts:
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+serve(async (req) => {
+  const { type, to, company, limit, reason } = await req.json()
+
+  // Use Resend, SendGrid, or any email provider
+  // Example with Resend (get API key from resend.com):
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+
+  let subject, html
+  if (type === 'credit_approved') {
+    subject = 'TerritoryX — Credit Approved'
+    html = `<h2>Congratulations ${company}!</h2><p>Your credit application has been approved.</p><p><strong>Credit Limit:</strong> $${(limit/100).toLocaleString()}</p><p>You can now start bidding on territories.</p><p><a href="https://your-render-url.com">Go to War Room</a></p>`
+  } else if (type === 'credit_rejected') {
+    subject = 'TerritoryX — Credit Application Update'
+    html = `<h2>Hello ${company},</h2><p>Your credit application was not approved at this time.</p><p><strong>Reason:</strong> ${reason}</p><p>You may reapply with updated information.</p>`
+  } else {
+    return new Response('Unknown type', { status: 400 })
+  }
+
+  if (RESEND_API_KEY) {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'TerritoryX <finance@territoryx.africa>', to, subject, html })
+    })
+  }
+
+  return new Response('OK')
+})
+
+3. Deploy:
+   supabase functions deploy notify-user
+
+4. Set secret:
+   supabase secrets set RESEND_API_KEY=your_resend_api_key
+
+═══════════════════════════════════════════════════════════════════════════════
+-->
 
 </body>
 </html>
