@@ -838,6 +838,9 @@ header{
 
 #resetBtn:disabled{background:rgba(255,255,255,0.1);color:var(--muted);cursor:not-allowed}
 
+
+.admin-badge{font-size:9px;color:var(--gold);margin-left:8px;padding:2px 6px;border:1px solid var(--gold);border-radius:2px;font-family:'IBM Plex Mono',monospace;letter-spacing:.1em;vertical-align:middle}
+
 </style>
 </head>
 <body>
@@ -1338,12 +1341,15 @@ async function initAuth() {
   const { data: { session } } = await _sb.auth.getSession();
   currentUser = session?.user || null;
   if (currentUser) {
+    console.log('User loaded:', currentUser.email, 'Role:', currentUser?.app_metadata?.role || currentUser?.user_metadata?.role || 'none');
     await loadUserDataFromSupabase();
   }
   _sb.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user || null;
     if (event === 'SIGNED_IN')  {
-      showToast('✓ Authenticated', 'success');
+      const detectedRole = currentUser?.app_metadata?.role || currentUser?.user_metadata?.role || currentUser?.raw_app_meta_data?.role || currentUser?.role || 'none';
+      console.log('Signed in:', currentUser?.email, 'Role:', detectedRole);
+      showToast('✓ Authenticated — Role: ' + detectedRole, detectedRole === 'admin' ? 'success' : 'info');
       loadUserDataFromSupabase().then(() => { renderAll(); updateAuthUI(); });
     }
     if (event === 'SIGNED_OUT') {
@@ -1355,7 +1361,14 @@ async function initAuth() {
 }
 
 function getUserId()   { return currentUser?.id || null; }
-function isAdmin()     { return currentUser?.app_metadata?.role === 'admin' || currentUser?.user_metadata?.role === 'admin'; }
+function isAdmin() {
+  // Check multiple possible locations for the role
+  const role = currentUser?.app_metadata?.role
+            || currentUser?.user_metadata?.role
+            || currentUser?.raw_app_meta_data?.role
+            || currentUser?.role;
+  return role === 'admin';
+}
 function requireAuth() { if (!getUserId()) { openAuthModal(); return false; } return true; }
 
 function updateAuthUI() {
@@ -1379,7 +1392,13 @@ function updateAuthUI() {
     authBtn.textContent = 'LOG OUT';
     authBtn.onclick = signOut;
     authBtn.style.display = 'inline-block';
-    if (logo) logo.innerHTML = 'TERRITORY<em>X</em><span style="font-size:9px;color:var(--gold);margin-left:6px;vertical-align:super">● ADMIN</span>';
+    // Prominent admin badge on logo
+    if (logo) {
+      logo.innerHTML = 'TERRITORY<em>X</em><span class="admin-badge">ADMIN</span>';
+      logo.style.border = '1px solid var(--gold)';
+      logo.style.padding = '2px 8px';
+      logo.style.borderRadius = '3px';
+    }
   } else {
     // Regular user logged in
     pill.onclick = openCreditModal;
@@ -1885,34 +1904,55 @@ function submitCreditApplication() {
 // ─── ADMIN CREDIT REVIEW — Approve or Reject Applications ───
 async function adminReviewCredit(applicationId, action, approvedLimit = 0, reason = '') {
   if (!isAdmin()) { showToast('Admin only', 'err'); return; }
-  if (!creditAccount || creditAccount.applicationId !== applicationId) {
-    showToast('Application not found', 'err'); return;
+
+  // Try to find the application in localStorage first
+  let targetAccount = null;
+  if (creditAccount && creditAccount.applicationId === applicationId) {
+    targetAccount = creditAccount;
+  }
+
+  // Also check localStorage for other accounts
+  if (!targetAccount) {
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith('tx_creditAccount')) {
+        try {
+          const ca = JSON.parse(localStorage.getItem(k));
+          if (ca && ca.applicationId === applicationId) targetAccount = ca;
+        } catch(e) {}
+      }
+    });
+  }
+
+  if (!targetAccount) {
+    showToast('Application not found in localStorage. Use SQL Editor to approve directly.', 'err');
+    return;
   }
 
   if (action === 'approve') {
-    creditAccount.status = 'ACTIVE';
-    creditAccount.limit = approvedLimit > 0 ? approvedLimit : creditAccount.estimatedLimit;
-    creditAccount.available = creditAccount.limit;
-    creditAccount.reviewedAt = Date.now();
-    creditAccount.reviewedBy = getUserId();
-    creditAccount.rejectionReason = null;
-    Storage.set('creditAccount', creditAccount);
-    DB.saveCreditAccount(creditAccount);
-    notifyUserCreditApproved(creditAccount);
-    showToast('✓ Credit approved — ' + fmtMoney(creditAccount.limit), 'success');
+    targetAccount.status = 'ACTIVE';
+    targetAccount.limit = approvedLimit > 0 ? approvedLimit : targetAccount.estimatedLimit;
+    targetAccount.available = targetAccount.limit;
+    targetAccount.reviewedAt = Date.now();
+    targetAccount.reviewedBy = getUserId();
+    targetAccount.rejectionReason = null;
+    Storage.set('creditAccount', targetAccount);
+    DB.saveCreditAccount(targetAccount);
+    notifyUserCreditApproved(targetAccount);
+    showToast('✓ Credit approved — ' + fmtMoney(targetAccount.limit), 'success');
   } else if (action === 'reject') {
-    creditAccount.status = 'REJECTED';
-    creditAccount.limit = 0;
-    creditAccount.available = 0;
-    creditAccount.reviewedAt = Date.now();
-    creditAccount.reviewedBy = getUserId();
-    creditAccount.rejectionReason = reason || 'Application did not meet criteria';
-    Storage.set('creditAccount', creditAccount);
-    DB.saveCreditAccount(creditAccount);
-    notifyUserCreditRejected(creditAccount);
+    targetAccount.status = 'REJECTED';
+    targetAccount.limit = 0;
+    targetAccount.available = 0;
+    targetAccount.reviewedAt = Date.now();
+    targetAccount.reviewedBy = getUserId();
+    targetAccount.rejectionReason = reason || 'Application did not meet criteria';
+    Storage.set('creditAccount', targetAccount);
+    DB.saveCreditAccount(targetAccount);
+    notifyUserCreditRejected(targetAccount);
     showToast('Application rejected', 'war');
   }
   renderAll();
+  adminLoadCreditApplications(); // Refresh the list
 }
 
 // ─── NOTIFICATION SYSTEM ───
@@ -2903,30 +2943,145 @@ async function adminLoadUsers() {
   adminRenderUsers(localUsers);
 }
 
+async function switchAdminTab(tab) {
+  document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  ['overview','territories','users','credit','invoices','sql'].forEach(t => {
+    const el = document.getElementById('adminTab-' + t);
+    if (el) el.style.display = t === tab ? 'block' : 'none';
+  });
+  // Refresh data when switching to certain tabs
+  if (tab === 'territories') adminLoadTerritories();
+  if (tab === 'users') adminLoadUsers();
+  if (tab === 'credit') adminLoadCreditApplications();
+  if (tab === 'invoices') adminLoadInvoices();
+  if (tab === 'overview') adminLoadOverview();
+}
+
+function adminLoadOverview() {
+  document.getElementById('adminEpochName').textContent = epochData?.name || '-';
+  document.getElementById('adminEpochStatus').textContent = epochData?.status || '-';
+  document.getElementById('adminTerrCount').textContent = ORDER.length;
+  document.getElementById('adminUserCount').textContent = '2+'; // From Supabase
+  document.getElementById('adminTotalVol').textContent = fmtMoney(epochData?.totalVolume || 0);
+  document.getElementById('adminToll2').textContent = fmtMoney(epochData?.platformToll || 0);
+  document.getElementById('adminToll').textContent = fmtMoney(revenue.toll);
+  document.getElementById('adminLate').textContent = fmtMoney(revenue.late);
+  document.getElementById('adminTotal').textContent = fmtMoney(revenue.total);
+  document.getElementById('adminCollected').textContent = fmtMoney(revenue.collected);
+}
+
+function adminLoadTerritories() {
+  const list = document.getElementById('adminTerrList');
+  if (!list) return;
+  const sorted = ORDER.map(id => ({id,...TERRITORIES[id]})).sort((a,b) => b.bid - a.bid);
+  list.innerHTML = sorted.map(t => `
+    <div class="inv-row" style="cursor:default">
+      <div class="inv-left" style="flex:2">
+        <div class="inv-num">${t.city}, ${t.country}</div>
+        <div class="inv-meta">${t.brand} · ${t.tier} · ${t.ownDays} days owned</div>
+      </div>
+      <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold);margin-right:10px">${fmtMoney(t.bid)}</div>
+      <div class="inv-status" style="border:1px solid ${t.color};color:${t.color};background:transparent;font-size:8px">${t.sudden ? 'SUDDEN' : 'ACTIVE'}</div>
+    </div>
+  `).join('');
+}
+
+function adminLoadInvoices() {
+  const list = document.getElementById('adminInvList');
+  if (!list) return;
+  if (!invoices.length) {
+    list.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">No invoices yet</div>';
+    return;
+  }
+  list.innerHTML = invoices.map(inv => {
+    const statusClass = inv.status === 'PAID' ? 'paid' : inv.status === 'OVERDUE' ? 'overdue' : 'issued';
+    return `
+      <div class="inv-row" onclick="showInvoiceDetail('${inv._id}')">
+        <div class="inv-left">
+          <div class="inv-num">${inv.invoiceNumber}</div>
+          <div class="inv-meta">${inv.territoryName} · ${inv.billedTo.companyName}</div>
+        </div>
+        <div class="inv-amt">${fmtMoney(inv.total)}</div>
+        <div class="inv-status ${statusClass}">${inv.status}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function adminRunSql() {
+  const sql = document.getElementById('adminSqlInput').value.trim();
+  const resultsDiv = document.getElementById('adminSqlResults');
+  if (!sql) { resultsDiv.textContent = 'Enter a SQL query'; return; }
+
+  resultsDiv.innerHTML = '<span style="color:var(--cyan)">Running...</span>';
+
+  // Note: Direct SQL execution from frontend requires an Edge Function or REST API
+  // For now, show the query and explain how to run it
+  resultsDiv.innerHTML = `
+    <div style="color:var(--gold);margin-bottom:8px">⚠️ SQL execution requires Supabase REST API or Edge Function</div>
+    <div style="color:var(--muted);margin-bottom:8px">Copy this query and run it in Supabase SQL Editor:</div>
+    <pre style="background:rgba(0,242,254,0.05);padding:10px;border-radius:2px;overflow-x:auto;color:var(--text);font-size:9px">${sql.replace(/</g, '&lt;')}</pre>
+    <div style="color:var(--muted);margin-top:8px">
+      To enable direct SQL execution, deploy an Edge Function with service_role key.<br>
+      See the Edge Function template in the HTML comments.
+    </div>
+  `;
+}
+
 function adminLoadCreditApplications() {
   const container = document.getElementById('adminCreditApps');
   if (!container) return;
+  container.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">Loading applications...</div>';
 
-  // In a real system, this would query all credit_accounts with status PENDING
-  // For now, show the current user's application if pending, plus demo data
   const apps = [];
-  if (creditAccount && creditAccount.status === 'PENDING') {
-    apps.push(creditAccount);
-  }
-  // Also check localStorage for other applications (demo mode)
-  Object.keys(localStorage).forEach(k => {
-    if (k.startsWith('tx_creditAccount')) {
-      try {
-        const ca = JSON.parse(localStorage.getItem(k));
-        if (ca && ca.status === 'PENDING' && ca.applicationId !== (creditAccount?.applicationId)) {
-          apps.push(ca);
-        }
-      } catch(e) {}
+
+  // Try Supabase first — query ALL credit_accounts (requires RLS bypass or Edge Function)
+  if (_sb) {
+    try {
+      const { data, error } = await _sb.from('credit_accounts').select('*').eq('status', 'PENDING');
+      if (!error && data && data.length) {
+        data.forEach(row => {
+          apps.push({
+            applicationId: row.user_id || 'db_' + row.created_at,
+            status: row.status,
+            estimatedLimit: row.credit_limit || 0,
+            requestedAmount: row.company_profile?.requestedAmount || row.credit_limit || 0,
+            companyProfile: row.company_profile || {},
+            createdAt: row.created_at
+          });
+        });
+      }
+    } catch (e) {
+      console.warn('Supabase query failed (RLS may block):', e.message);
     }
-  });
+  }
+
+  // Fallback: check localStorage for this device
+  if (!apps.length) {
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith('tx_creditAccount')) {
+        try {
+          const ca = JSON.parse(localStorage.getItem(k));
+          if (ca && ca.status === 'PENDING') apps.push(ca);
+        } catch(e) {}
+      }
+    });
+  }
 
   if (!apps.length) {
-    container.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">No pending applications</div>';
+    container.innerHTML = `
+      <div style="padding:12px;background:rgba(0,242,254,0.03);border:1px solid var(--border);border-radius:3px">
+        <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);line-height:1.6">
+          No pending applications visible.<br><br>
+          <strong style="color:var(--text)">To approve applications from other users:</strong><br>
+          1. Open Supabase SQL Editor<br>
+          2. Run: <code style="color:var(--cyan)">SELECT * FROM credit_accounts WHERE status = 'PENDING';</code><br>
+          3. Note the <strong>user_id</strong> and desired limit<br>
+          4. Run: <code style="color:var(--cyan)">UPDATE credit_accounts SET status = 'ACTIVE', credit_limit = 5000000, available = 5000000 WHERE user_id = 'USER_ID_HERE';</code><br><br>
+          <strong style="color:var(--gold)">Or deploy the admin-users Edge Function for full UI control.</strong>
+        </div>
+      </div>
+    `;
     return;
   }
 
@@ -2934,23 +3089,23 @@ function adminLoadCreditApplications() {
     <div style="padding:12px;background:rgba(0,242,254,0.03);border:1px solid var(--border);border-radius:3px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div>
-          <div style="font-family:IBM Plex Mono;font-size:11px;font-weight:600;color:var(--text)">${app.companyProfile.company}</div>
-          <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--muted)">${app.companyProfile.email} · ${app.companyProfile.country}</div>
+          <div style="font-family:IBM Plex Mono;font-size:11px;font-weight:600;color:var(--text)">${app.companyProfile?.company || 'Unknown Company'}</div>
+          <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--muted)">${app.companyProfile?.email || 'no email'} · ${app.companyProfile?.country || 'N/A'}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold)">Requested: ${fmtMoney(app.requestedAmount || app.estimatedLimit)}</div>
-          <div style="font-family:IBM Plex Mono;font-size:8px;color:var(--muted)">Est. max: ${fmtMoney(app.estimatedLimit)}</div>
+          <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold)">Requested: ${fmtMoney(app.requestedAmount || app.estimatedLimit || 0)}</div>
+          <div style="font-family:IBM Plex Mono;font-size:8px;color:var(--muted)">Est. max: ${fmtMoney(app.estimatedLimit || 0)}</div>
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <div style="flex:1;font-family:IBM Plex Mono;font-size:8px;color:var(--muted);line-height:1.6">
-          Reg: ${app.companyProfile.reg}<br>
-          Revenue: ${app.companyProfile.revenue} · Years: ${app.companyProfile.years}<br>
-          Employees: ${app.companyProfile.employees}
+          Reg: ${app.companyProfile?.reg || 'N/A'}<br>
+          Revenue: ${app.companyProfile?.revenue || 'N/A'} · Years: ${app.companyProfile?.years || 'N/A'}<br>
+          Employees: ${app.companyProfile?.employees || 'N/A'}
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <input class="form-input" type="text" id="approveLimit_${app.applicationId}" value="${fmtMoney(app.requestedAmount || app.estimatedLimit)}" placeholder="Approved limit $" style="flex:1;font-size:10px;padding:5px 8px"/>
+        <input class="form-input" type="text" id="approveLimit_${app.applicationId}" value="${fmtMoney(app.requestedAmount || app.estimatedLimit || 0)}" placeholder="Approved limit $" style="flex:1;font-size:10px;padding:5px 8px"/>
         <button class="btn btn-primary btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'approve', toCents(parseFloat(document.getElementById('approveLimit_${app.applicationId}').value.replace(/[^\d]/g, ''))))">APPROVE</button>
         <button class="btn btn-danger btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'reject', 0, prompt('Rejection reason:') || '')">REJECT</button>
       </div>
@@ -3733,34 +3888,66 @@ async function signOut() {
   setTimeout(() => location.reload(), 400);
 }
 
-// ─── PASSWORD RECOVERY HANDLER ───
-// Detects Supabase recovery token in URL and opens reset modal
-let _recoverySession = null;
+// ─── PASSWORD RECOVERY & MAGIC LINK HANDLER ───
+// Supabase sends tokens in URL hash: #access_token=xxx&refresh_token=xxx&type=recovery
+// This runs on every page load and handles both recovery and magiclink
 
-function handlePasswordRecovery() {
+let _authTokenFromUrl = null;
+
+async function handlePasswordRecovery() {
   const hash = window.location.hash;
-  const params = new URLSearchParams(window.location.search);
-  const type = params.get('type');
+  if (!hash || hash.length < 2) return; // No hash in URL
 
-  // Check URL hash for access_token (Supabase sends this)
-  if (hash.includes('access_token=') || hash.includes('type=recovery')) {
-    const hashParams = new URLSearchParams(hash.substring(1));
-    const accessToken = hashParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token');
+  const hashParams = new URLSearchParams(hash.substring(1));
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+  const type = hashParams.get('type');
 
-    if (accessToken) {
-      // Exchange the token for a session
-      _sb.auth.exchangeCodeForSession(accessToken).then(({ data, error }) => {
-        if (error) {
-          showToast('Password reset link expired or invalid', 'err');
-          return;
-        }
-        _recoverySession = data.session;
-        // Clear the hash from URL
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        // Open reset modal
-        document.getElementById('resetPasswordModal').classList.add('active');
-      });
+  if (!accessToken) return; // No token, nothing to do
+
+  // Clear the hash from URL immediately (cleaner UX)
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  if (type === 'recovery') {
+    // ── PASSWORD RECOVERY ──
+    // Set the temporary session so updateUser() works
+    const { data, error } = await _sb.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken || ''
+    });
+
+    if (error || !data.session) {
+      showToast('Reset link expired or invalid. Request a new one.', 'err');
+      return;
+    }
+
+    _authTokenFromUrl = data.session;
+    // Open the reset modal
+    document.getElementById('resetPasswordModal').classList.add('active');
+    showToast('Enter your new password below', 'info');
+
+  } else if (type === 'magiclink' || type === 'signup') {
+    // ── MAGIC LINK / EMAIL CONFIRMATION ──
+    // Automatically sign the user in
+    const { data, error } = await _sb.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken || ''
+    });
+
+    if (error || !data.session) {
+      showToast('Login link expired. Please sign in manually.', 'err');
+      return;
+    }
+
+    currentUser = data.session.user;
+    await loadUserDataFromSupabase();
+    updateAuthUI();
+    renderAll();
+
+    if (type === 'magiclink') {
+      showToast('✓ Signed in via magic link', 'success');
+    } else {
+      showToast('✓ Email confirmed — welcome to TerritoryX', 'success');
     }
   }
 }
@@ -3808,14 +3995,19 @@ async function submitNewPassword() {
 
   if (!_sb) { showToast('Supabase not configured', 'err'); return; }
 
+  // updateUser() uses the current session (set by recovery token)
   const { data, error } = await _sb.auth.updateUser({ password: pass });
   if (error) {
     showToast('Failed to update password: ' + error.message, 'err');
-  } else {
-    closeModal('resetPasswordModal');
-    showToast('✓ Password updated — loading your account', 'success');
-    // The user is now authenticated with the recovery session
-    // Load their data from Supabase and refresh the UI
+    return;
+  }
+
+  closeModal('resetPasswordModal');
+  showToast('✓ Password updated successfully', 'success');
+
+  // After password update, the user is still authenticated
+  // Load their full profile and refresh the UI
+  if (data.user) {
     currentUser = data.user;
     await loadUserDataFromSupabase();
     updateAuthUI();
