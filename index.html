@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>TerritoryX — Zero Capital Edition</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://d3js.org/d3.v7.min.js">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
 
 // ─── BILLBOARD UPLOAD — Winner Uploads Their Creative ───
 async function uploadBillboard(territoryId, file) {
@@ -106,7 +107,8 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 */
 
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
 /*
 ═══════════════════════════════════════════════════════════════════════════════
 REQUIRED SUPABASE RLS POLICIES — Run this in your Supabase SQL Editor
@@ -3028,7 +3030,7 @@ async function adminRunSql() {
   `;
 }
 
-function adminLoadCreditApplications() {
+async function adminLoadCreditApplications() {
   const container = document.getElementById('adminCreditApps');
   if (!container) return;
   container.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:8px 0">Loading applications...</div>';
