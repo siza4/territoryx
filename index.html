@@ -953,11 +953,6 @@ header{
         <div class="cp-amount" id="cpAmount">$0</div>
         <div class="cp-desc">Estimated Credit Limit</div>
       </div>
-      <div class="form-group" style="margin-top:14px">
-        <label class="form-label">Requested Credit Amount <span style="color:var(--red)">*</span></label>
-        <input class="form-input" id="caRequestedAmount" type="text" placeholder="e.g. $250,000" oninput="formatCreditRequest(this)"/>
-        <div class="form-hint" id="creditRequestHint">Must not exceed estimated limit above</div>
-      </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-secondary" onclick="closeModal('creditModal')">CANCEL</button>
@@ -1072,7 +1067,7 @@ header{
     <input class="search-input" id="searchInput" type="text" placeholder="Search territory, city, country..." autocomplete="off"/>
     <div class="search-dropdown" id="searchDropdown"></div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px" id="headerRight">
+  <div style="display:flex;align-items:center;gap:12px">
     <div class="epoch" id="epochTimer">EPOCH 07</div>
     <div class="hstats">
       <div class="hs"><div class="hs-label">AUCTIONS</div><div class="hs-val" id="hAuctions">47</div></div>
@@ -1085,7 +1080,6 @@ header{
         <div class="cp-val" id="cpDisplay">APPLY</div>
       </div>
     </div>
-    <button class="btn btn-secondary btn-sm" id="authBtn" onclick="toggleAuth()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.06em;padding:5px 12px">SIGN IN</button>
   </div>
 </header>
 
@@ -1348,28 +1342,13 @@ function requireAuth() { if (!getUserId()) { openAuthModal(); return false; } re
 
 function updateAuthUI() {
   const pill = document.getElementById('creditPill');
-  const authBtn = document.getElementById('authBtn');
-  if (!pill || !authBtn) return;
-
+  if (!pill) return;
   if (!currentUser) {
-    // Logged out state
-    pill.innerHTML = `<div><div class="cp-label">CREDIT</div><div class="cp-val" id="cpDisplay">APPLY</div></div>`;
-    pill.onclick = openCreditModal;
-    authBtn.textContent = 'SIGN IN';
-    authBtn.onclick = openAuthModal;
-    authBtn.style.display = 'inline-block';
+    pill.innerHTML = `<div><div class="cp-label">ACCOUNT</div><div class="cp-val" style="color:var(--red)">SIGN IN</div></div>`;
+    pill.onclick = openAuthModal;
   } else {
-    // Logged in state
     pill.onclick = openCreditModal;
-    authBtn.textContent = 'LOG OUT';
-    authBtn.onclick = signOut;
-    authBtn.style.display = 'inline-block';
   }
-}
-
-function toggleAuth() {
-  if (!currentUser) openAuthModal();
-  else signOut();
 }
 
 // ─── STORAGE ENGINE ───
@@ -1762,37 +1741,6 @@ function updateCreditPreview() {
     const cpPrev = document.getElementById('creditPreview');
     if (cpAmt) cpAmt.textContent = fmtMoney(limit);
     if (cpPrev) cpPrev.style.display = 'block';
-    // Store the estimated limit for validation
-    window._estimatedCreditLimit = limit;
-    validateCreditRequest();
-  }
-}
-
-function formatCreditRequest(input) {
-  let val = input.value.replace(/[^\d]/g, '');
-  if (val) {
-    const num = parseInt(val);
-    input.value = '$' + num.toLocaleString();
-  }
-  validateCreditRequest();
-}
-
-function validateCreditRequest() {
-  const reqEl = document.getElementById('caRequestedAmount');
-  const hint = document.getElementById('creditRequestHint');
-  if (!reqEl || !hint) return;
-  const reqRaw = reqEl.value.replace(/[^\d]/g, '');
-  const requested = reqRaw ? parseInt(reqRaw) : 0;
-  const limit = window._estimatedCreditLimit || 0;
-  if (requested === 0) {
-    hint.className = 'form-hint';
-    hint.textContent = 'Enter amount up to estimated limit';
-  } else if (requested > limit) {
-    hint.className = 'form-hint warn';
-    hint.textContent = '✗ Exceeds estimated limit of ' + fmtMoney(limit);
-  } else {
-    hint.className = 'form-hint ok';
-    hint.textContent = '✓ Within estimated limit';
   }
 }
 
@@ -1814,20 +1762,12 @@ function submitCreditApplication() {
   const employees = document.getElementById('caEmployees').value;
   const website = document.getElementById('caWebsite').value.trim();
   const email = document.getElementById('caEmail').value.trim();
-  const reqRaw = document.getElementById('caRequestedAmount').value.replace(/[^\d]/g, '');
-  const requestedAmount = reqRaw ? parseInt(reqRaw) : 0;
 
   if (!company || !reg || !country || !revenue || !years || !employees) {
     showToast('Complete all required fields', 'err'); return;
   }
-  if (!requestedAmount || requestedAmount <= 0) {
-    showToast('Enter a requested credit amount', 'err'); return;
-  }
 
   const estimatedLimit = calculateCreditLimit({ revenue, years });
-  if (requestedAmount > estimatedLimit) {
-    showToast('Requested amount exceeds estimated limit of ' + fmtMoney(estimatedLimit), 'err'); return;
-  }
 
   // Create application with PENDING status — requires admin review
   creditAccount = {
@@ -1835,8 +1775,7 @@ function submitCreditApplication() {
     limit: 0,              // No credit until approved
     used: 0,
     available: 0,
-    estimatedLimit: estimatedLimit,  // System calculated max
-    requestedAmount: requestedAmount, // What user asked for
+    estimatedLimit: estimatedLimit,  // What they applied for
     companyProfile: { company, reg, country, revenue, years, employees, website, email },
     paymentHistory: [],
     invoices: [],
@@ -2914,10 +2853,7 @@ function adminLoadCreditApplications() {
           <div style="font-family:IBM Plex Mono;font-size:11px;font-weight:600;color:var(--text)">${app.companyProfile.company}</div>
           <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--muted)">${app.companyProfile.email} · ${app.companyProfile.country}</div>
         </div>
-        <div style="text-align:right">
-          <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold)">Requested: ${fmtMoney(app.requestedAmount || app.estimatedLimit)}</div>
-          <div style="font-family:IBM Plex Mono;font-size:8px;color:var(--muted)">Est. max: ${fmtMoney(app.estimatedLimit)}</div>
-        </div>
+        <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--gold)">${fmtMoney(app.estimatedLimit)}</div>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <div style="flex:1;font-family:IBM Plex Mono;font-size:8px;color:var(--muted);line-height:1.6">
@@ -2927,8 +2863,8 @@ function adminLoadCreditApplications() {
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <input class="form-input" type="text" id="approveLimit_${app.applicationId}" value="${fmtMoney(app.requestedAmount || app.estimatedLimit)}" placeholder="Approved limit $" style="flex:1;font-size:10px;padding:5px 8px"/>
-        <button class="btn btn-primary btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'approve', toCents(parseFloat(document.getElementById('approveLimit_${app.applicationId}').value.replace(/[^\d]/g, ''))))">APPROVE</button>
+        <input class="form-input" type="text" id="approveLimit_${app.applicationId}" placeholder="Approved limit $" style="flex:1;font-size:10px;padding:5px 8px"/>
+        <button class="btn btn-primary btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'approve', toCents(parseFloat(document.getElementById('approveLimit_${app.applicationId}').value.replace(/[$,\s]/g, ''))))">APPROVE</button>
         <button class="btn btn-danger btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'reject', 0, prompt('Rejection reason:') || '')">REJECT</button>
       </div>
     </div>
@@ -3572,30 +3508,8 @@ function validatePassword(pass) {
 
 document.addEventListener('DOMContentLoaded', () => {
   const passUp = document.getElementById('authPasswordUp');
-  const passConfirm = document.getElementById('authPasswordConfirm');
-  if (passUp) passUp.addEventListener('input', (e) => {
-    validatePassword(e.target.value);
-    checkPasswordsMatch();
-  });
-  if (passConfirm) passConfirm.addEventListener('input', checkPasswordsMatch);
+  if (passUp) passUp.addEventListener('input', (e) => validatePassword(e.target.value));
 });
-
-function checkPasswordsMatch() {
-  const pass = document.getElementById('authPasswordUp')?.value || '';
-  const confirm = document.getElementById('authPasswordConfirm')?.value || '';
-  const confirmHint = document.getElementById('confirmHint');
-  if (!confirmHint) return;
-  if (confirm.length === 0) {
-    confirmHint.className = 'form-hint';
-    confirmHint.textContent = 'Repeat your password';
-  } else if (pass === confirm) {
-    confirmHint.className = 'form-hint ok';
-    confirmHint.textContent = '✓ Passwords match';
-  } else {
-    confirmHint.className = 'form-hint warn';
-    confirmHint.textContent = '✗ Passwords do not match';
-  }
-}
 
 async function signInEmail() {
   if (!_sb) { showToast('Supabase not configured — running in demo mode', 'war'); return; }
@@ -3631,10 +3545,7 @@ async function signUpEmail() {
   if (!validatePassword(pass)) { showToast('Password does not meet requirements', 'err'); return; }
   const { data, error } = await _sb.auth.signUp({
     email, password: pass,
-    options: {
-      data: { company_name: company, role: 'user' },
-      emailRedirectTo: window.location.origin + window.location.pathname
-    }
+    options: { data: { company_name: company, role: 'user' } }
   });
   if (error) showToast(error.message, 'err');
   else {
@@ -3647,7 +3558,7 @@ async function resendConfirmation() {
   if (!_sb) return;
   const email = document.getElementById('authEmailUp').value.trim() || document.getElementById('authEmail').value.trim();
   if (!email) { showToast('Enter your email first', 'err'); return; }
-  const { error } = await _sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: window.location.origin + window.location.pathname } });
+  const { error } = await _sb.auth.resend({ type: 'signup', email });
   if (error) showToast(error.message, 'err');
   else showToast('Confirmation email resent', 'success');
 }
@@ -3859,7 +3770,6 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
         <div class="form-group">
           <label class="form-label">Confirm Password <span style="color:var(--red)">*</span></label>
           <input class="form-input" id="authPasswordConfirm" type="password" placeholder="Repeat password" autocomplete="new-password"/>
-          <div class="form-hint" id="confirmHint">Repeat your password</div>
         </div>
         <div class="form-group">
           <label class="form-label">Company Name <span style="color:var(--red)">*</span></label>
