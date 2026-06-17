@@ -1337,10 +1337,19 @@ async function initAuth() {
   if (!_sb) { console.warn('Supabase not configured — running in demo mode'); return; }
   const { data: { session } } = await _sb.auth.getSession();
   currentUser = session?.user || null;
+  if (currentUser) {
+    await loadUserDataFromSupabase();
+  }
   _sb.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user || null;
-    if (event === 'SIGNED_IN')  { showToast('✓ Authenticated', 'success'); renderAll(); updateAuthUI(); }
-    if (event === 'SIGNED_OUT') { showToast('Signed out', 'info'); setTimeout(() => location.reload(), 400); }
+    if (event === 'SIGNED_IN')  {
+      showToast('✓ Authenticated', 'success');
+      loadUserDataFromSupabase().then(() => { renderAll(); updateAuthUI(); });
+    }
+    if (event === 'SIGNED_OUT') {
+      showToast('Signed out', 'info');
+      setTimeout(() => location.reload(), 400);
+    }
   });
   updateAuthUI();
 }
@@ -1352,21 +1361,32 @@ function requireAuth() { if (!getUserId()) { openAuthModal(); return false; } re
 function updateAuthUI() {
   const pill = document.getElementById('creditPill');
   const authBtn = document.getElementById('authBtn');
+  const logo = document.getElementById('logoBtn');
   if (!pill || !authBtn) return;
 
   if (!currentUser) {
-    // Logged out state
+    // Logged out state — visitor
     pill.innerHTML = `<div><div class="cp-label">CREDIT</div><div class="cp-val" id="cpDisplay">APPLY</div></div>`;
     pill.onclick = openCreditModal;
     authBtn.textContent = 'SIGN IN';
     authBtn.onclick = openAuthModal;
     authBtn.style.display = 'inline-block';
-  } else {
-    // Logged in state
+    if (logo) logo.innerHTML = 'TERRITORY<em>X</em>';
+  } else if (isAdmin()) {
+    // Admin logged in — show admin badge
+    pill.innerHTML = `<div><div class="cp-label">CREDIT</div><div class="cp-val" id="cpDisplay">ADMIN</div></div>`;
     pill.onclick = openCreditModal;
     authBtn.textContent = 'LOG OUT';
     authBtn.onclick = signOut;
     authBtn.style.display = 'inline-block';
+    if (logo) logo.innerHTML = 'TERRITORY<em>X</em><span style="font-size:9px;color:var(--gold);margin-left:6px;vertical-align:super">● ADMIN</span>';
+  } else {
+    // Regular user logged in
+    pill.onclick = openCreditModal;
+    authBtn.textContent = 'LOG OUT';
+    authBtn.onclick = signOut;
+    authBtn.style.display = 'inline-block';
+    if (logo) logo.innerHTML = 'TERRITORY<em>X</em>';
   }
 }
 
@@ -3708,10 +3728,7 @@ async function signOut() {
   myBids = [];
   invoices = [];
   notifications = [];
-  Storage.set('creditAccount', null);
-  Storage.set('myBids', []);
-  Storage.set('invoices', []);
-  Storage.set('notifications', []);
+  // Don't clear localStorage — just clear memory. The next user will load their own data from Supabase.
   showToast('Signed out', 'info');
   setTimeout(() => location.reload(), 400);
 }
@@ -3796,11 +3813,14 @@ async function submitNewPassword() {
     showToast('Failed to update password: ' + error.message, 'err');
   } else {
     closeModal('resetPasswordModal');
-    showToast('✓ Password updated — sign in with your new password', 'success');
-    // Sign out any existing session to force re-login
-    await _sb.auth.signOut();
-    currentUser = null;
+    showToast('✓ Password updated — loading your account', 'success');
+    // The user is now authenticated with the recovery session
+    // Load their data from Supabase and refresh the UI
+    currentUser = data.user;
+    await loadUserDataFromSupabase();
     updateAuthUI();
+    renderAll();
+    showToast('✓ Welcome back, ' + (currentUser?.user_metadata?.company_name || 'Warrior'), 'success');
   }
 }
 
@@ -3848,12 +3868,8 @@ async function initSupabase() {
     };
     Storage.set('epoch', epochData);
   }
-  const dbCredit = await DB.loadCreditAccount();
-  if (dbCredit) { creditAccount = dbCredit; Storage.set('creditAccount', creditAccount); }
-  const dbBids = await DB.loadBids();
-  if (dbBids.length) { myBids = dbBids; Storage.set('myBids', myBids); }
-  const dbInvoices = await DB.loadInvoices();
-  if (dbInvoices.length) { invoices = dbInvoices; Storage.set('invoices', invoices); }
+  // Load current user's data from Supabase (not localStorage)
+  await loadUserDataFromSupabase();
   DB.subscribeToTerritories(id => {
     showToast('⚡ NEW BID on ' + (TERRITORIES[id]?.city || id), 'info');
     if (id === current) renderAll();
@@ -3861,6 +3877,25 @@ async function initSupabase() {
   renderAll();
   updateHeaderStats();
   showToast('✓ LIVE — real-time bidding active', 'success');
+}
+
+async function loadUserDataFromSupabase() {
+  if (!_sb || !getUserId()) return;
+  // Load credit account for THIS user only
+  const dbCredit = await DB.loadCreditAccount();
+  if (dbCredit) {
+    creditAccount = dbCredit;
+  } else {
+    creditAccount = null; // No credit account for this user
+  }
+  // Load bids for THIS user only
+  const dbBids = await DB.loadBids();
+  myBids = dbBids || [];
+  // Load invoices for THIS user only
+  const dbInvoices = await DB.loadInvoices();
+  invoices = dbInvoices || [];
+  // Load notifications
+  notifications = Storage.get('notifications_' + getUserId(), []);
 }
 
 // Seed Supabase if empty (first run)
