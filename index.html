@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>TerritoryX — Zero Capital Edition</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js">function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
 <script>
 
 // ─── BILLBOARD UPLOAD — Winner Uploads Their Creative ───
@@ -106,8 +106,8 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 ═══════════════════════════════════════════════════════════════════════════════
 */
 
-</script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
 <script>
 /*
 ═══════════════════════════════════════════════════════════════════════════════
@@ -147,7 +147,7 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 ═══════════════════════════════════════════════════════════════════════════════
 */
 
-</script>
+function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;background:#04060B;color:#E2E8F0;font-family:'Inter',sans-serif;overflow:hidden;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
@@ -1218,7 +1218,7 @@ header{
       <div class="section-title">Place Counter-Bid</div>
       <div class="bid-form">
         <div class="bid-row">
-          <input class="bid-input" id="bidInput" type="text" placeholder="$631,000" onkeydown="if(event.key==='Enter')placeBid()"/>
+          <input class="bid-input" id="bidInput" type="text" placeholder="$631,000" onkeydown="if(event.key==='Enter')placeBid()" oninput="formatBidInput(this)"/>
           <button class="bid-btn danger" id="bidBtn">COUNTER</button>
         </div>
         <div class="bid-min">MIN: <span style="color:var(--cyan)" id="minBid">$631,000</span> · CREDIT: <span style="color:var(--gold)" id="balSpan">APPLY</span></div>
@@ -2264,7 +2264,7 @@ function placeBid() {
   const t = TERRITORIES[current];
 
   if (!amt || amt <= t.bid) {
-    showToast('Bid must exceed ' + fmtMoney(t.bid), 'err'); return;
+    showToast('Bid must exceed ' + fmtMoney(t.bid) + '. You entered: ' + fmtMoney(amt), 'err'); return;
   }
 
   const tollBuffer = Math.floor(amt * CONFIG.PLATFORM_TOLL_RATE);
@@ -4262,7 +4262,7 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 ═══════════════════════════════════════════════════════════════════════════════
 */
 
-</script>
+function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
 
 <!-- AUTH MODAL — Production Grade -->
 <div class="modal-overlay" id="authModal" onclick="modalOverlayClick(event,'authModal')">
@@ -4537,6 +4537,6 @@ serve(async (req) => {
   </div>
 </div>
 
-<script src="api.js"></script>
+<script src="api.js">function formatBidInput(input) { let v = input.value.replace(/[^0-9]/g, ''); if (v) { const num = parseInt(v); input.value = '$' + num.toLocaleString(); } }<</script>
 </body>
 </html>
