@@ -34,6 +34,7 @@ async function uploadBillboard(territoryId, file) {
       const publicUrl = urlData.publicUrl;
       t.imgL = publicUrl; t.imgP = publicUrl;
       await DB.saveTerritory(territoryId);
+      saveLocalTerritories();
       if (current === territoryId) {
         triggerTakeover(t.color, publicUrl);
         setTimeout(() => renderAll(), 1500);
@@ -49,6 +50,7 @@ async function uploadBillboard(territoryId, file) {
     const base64 = ev.target.result;
     t.imgL = base64; t.imgP = base64;
     Storage.set('territory_' + territoryId + '_billboard', base64);
+    saveLocalTerritories();
     if (current === territoryId) {
       triggerTakeover(t.color, base64);
       setTimeout(() => renderAll(), 1500);
@@ -108,6 +110,7 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 /*
 ═══════════════════════════════════════════════════════════════════════════════
@@ -150,25 +153,50 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
 </script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{width:100%;height:100%;background:#04060B;color:#E2E8F0;font-family:'Inter',sans-serif;overflow:hidden;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+html,body{width:100%;height:100%;background:#020509;color:#E8EDF5;font-family:'Inter',sans-serif;overflow:hidden;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 :root{
-  --bg:#04060B;--panel:rgba(10,16,30,0.95);--cyan:#00F2FE;--red:#EF4444;
-  --gold:#F59E0B;--green:#22C55E;--text:#E2E8F0;--muted:rgba(226,232,240,0.45);
-  --border:rgba(0,242,254,0.10);--border-hi:rgba(0,242,254,0.35);
-  --glass:rgba(10,16,30,0.8);--purple:#8B5CF6;--orange:#F97316
+  --bg:#020509;
+  --panel:rgba(6,12,24,0.97);
+  --cyan:#00E5FF;
+  --cyan2:#00B8D9;
+  --red:#FF3D57;
+  --gold:#FFB800;
+  --gold2:#FF8C00;
+  --green:#00E676;
+  --text:#E8EDF5;
+  --muted:rgba(200,215,240,0.42);
+  --border:rgba(0,229,255,0.12);
+  --border-hi:rgba(0,229,255,0.40);
+  --glass:rgba(6,12,24,0.85);
+  --purple:#A855F7;
+  --orange:#FF6B2B;
+  --glow-cyan:rgba(0,229,255,0.18);
+  --glow-gold:rgba(255,184,0,0.22);
+  --glow-red:rgba(255,61,87,0.20);
+  --panel-grad:linear-gradient(160deg,rgba(8,16,34,0.98) 0%,rgba(4,9,20,0.99) 100%);
+  --header-grad:linear-gradient(90deg,rgba(2,5,9,1) 0%,rgba(5,10,22,0.99) 60%,rgba(2,5,9,1) 100%);
+}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 60% 40% at 15% 50%,rgba(0,120,200,0.06) 0%,transparent 70%),
+    radial-gradient(ellipse 50% 35% at 85% 30%,rgba(255,184,0,0.05) 0%,transparent 65%),
+    radial-gradient(ellipse 40% 60% at 50% 100%,rgba(0,229,255,0.04) 0%,transparent 60%);
 }
 
-.app{display:flex;flex-direction:column;height:100vh;width:100vw;position:relative}
+.app{display:flex;flex-direction:column;height:100vh;width:100vw;position:relative;z-index:1}
 
 /* ═══ HEADER ═══ */
 header{
   display:flex;align-items:center;justify-content:space-between;
   padding:0 18px;height:52px;flex-shrink:0;z-index:200;
-  background:rgba(4,6,11,0.98);border-bottom:1px solid var(--border);
-  backdrop-filter:blur(20px)
+  background:var(--header-grad);
+  border-bottom:1px solid rgba(0,229,255,0.14);
+  backdrop-filter:blur(24px);
+  box-shadow:0 1px 0 rgba(0,229,255,0.06),0 4px 24px rgba(0,0,0,0.5)
 }
-.logo{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:17px;letter-spacing:.12em;color:var(--text);white-space:nowrap;cursor:pointer}
-.logo em{color:var(--cyan);font-style:normal}
+.logo{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:17px;letter-spacing:.12em;color:var(--text);white-space:nowrap;cursor:pointer;text-shadow:0 0 20px rgba(0,229,255,0.3)}
+.logo em{color:var(--cyan);font-style:normal;text-shadow:0 0 16px rgba(0,229,255,0.6)}
 .search-wrap{flex:1;max-width:380px;margin:0 20px;position:relative}
 .search-input{
   width:100%;background:rgba(0,242,254,0.04);border:1px solid var(--border);
@@ -843,7 +871,107 @@ header{
 
 .admin-badge{font-size:9px;color:var(--gold);margin-left:8px;padding:2px 6px;border:1px solid var(--gold);border-radius:2px;font-family:'IBM Plex Mono',monospace;letter-spacing:.1em;vertical-align:middle}
 
+
+/* ═══ VIBRANT ENHANCEMENT LAYER ═══ */
+
+/* Glowing section labels */
+.slabel{text-shadow:0 0 12px rgba(0,229,255,0.4)}
+
+/* Live dot pulse — brighter */
+.live-dot{box-shadow:0 0 0 0 rgba(0,230,118,0.5);animation:livePulse 2s infinite}
+@keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(0,230,118,0.5)}70%{box-shadow:0 0 0 6px rgba(0,230,118,0)}100%{box-shadow:0 0 0 0 rgba(0,230,118,0)}}
+
+/* Panel section dividers */
+.shead{position:relative}
+.shead::after{content:'';position:absolute;bottom:0;left:14px;right:14px;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,229,255,0.18),transparent)}
+
+/* Territory value text — gold glow */
+.tval{text-shadow:0 0 14px rgba(255,184,0,0.35)}
+.hs-val.gold{text-shadow:0 0 14px rgba(255,184,0,0.4)}
+.hs-val.red{text-shadow:0 0 14px rgba(255,61,87,0.35)}
+.hs-val.green{text-shadow:0 0 14px rgba(0,230,118,0.35)}
+
+/* Cyan value glow */
+.cp-val.ok{text-shadow:0 0 12px rgba(0,230,118,0.4)}
+.cp-val.warn{text-shadow:0 0 12px rgba(255,61,87,0.4)}
+
+/* Bid input — subtle inner glow */
+.bid-input{background:rgba(2,5,12,0.85)!important;border:1px solid rgba(0,229,255,0.16)!important;border-radius:3px!important}
+.bid-input:focus{border-color:var(--cyan)!important;box-shadow:0 0 0 2px rgba(0,229,255,0.1),0 0 20px rgba(0,229,255,0.08)!important}
+
+/* Ticker glow accent */
+.ti .am{text-shadow:0 0 10px rgba(0,229,255,0.5)}
+.ti .tr{text-shadow:0 0 10px rgba(255,184,0,0.4)}
+.ttext{text-shadow:0 0 10px rgba(255,61,87,0.6)}
+
+/* Billboard detect pulse ── brighter */
+.detect-pulse{text-shadow:0 0 16px rgba(0,229,255,0.6)}
+
+/* Territory name glow on billboard */
+.territory-name{text-shadow:0 2px 40px rgba(0,0,0,0.8),0 0 60px rgba(0,229,255,0.12)}
+
+/* Rankings highlight */
+.rk-val{text-shadow:0 0 10px rgba(255,184,0,0.3)}
+
+/* Modal head border glow */
+.modal-head{position:relative}
+.modal-head::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,229,255,0.3),transparent)}
+
+/* Btn primary — cinematic gradient */
+.btn-primary{
+  background:linear-gradient(135deg,var(--cyan) 0%,#0099BB 100%)!important;
+  box-shadow:0 0 20px rgba(0,229,255,0.3),0 4px 12px rgba(0,0,0,0.4)!important;
+  color:#020509!important;font-weight:700!important;letter-spacing:.06em
+}
+.btn-primary:hover{
+  background:linear-gradient(135deg,#60F0FF 0%,var(--cyan) 100%)!important;
+  box-shadow:0 0 32px rgba(0,229,255,0.45),0 6px 16px rgba(0,0,0,0.4)!important;
+  transform:translateY(-1px)
+}
+
+/* Danger bid-btn ── red pulse stays bright */
+.bid-btn.danger{background:linear-gradient(135deg,#FF3D57,#CC0022)!important;
+  box-shadow:0 0 20px rgba(255,61,87,0.4),0 4px 12px rgba(0,0,0,0.4)!important}
+
+/* Active tab highlight */
+.nav-item.active,.tab.active{
+  background:rgba(0,229,255,0.08)!important;
+  border-bottom:2px solid var(--cyan)!important;
+  color:var(--cyan)!important;
+  text-shadow:0 0 12px rgba(0,229,255,0.4)
+}
+
+/* Epoch counter ── brighter */
+.epoch{text-shadow:0 0 14px rgba(0,229,255,0.5)}
+
+/* Challenger pressure ── redder */
+.ch-pressure{text-shadow:0 0 10px rgba(255,61,87,0.5)}
+
+/* Map hover ── gold glow */
+.strat-map:hover{border-color:rgba(0,229,255,0.25)!important;
+  box-shadow:0 8px 40px rgba(0,229,255,0.1),0 0 0 1px rgba(0,229,255,0.08)!important}
+
+/* Demo badge ── warmer gold */
+.demo-badge{
+  background:rgba(255,184,0,0.07)!important;
+  border-bottom:1px solid rgba(255,184,0,0.18)!important;
+  text-shadow:0 0 12px rgba(255,184,0,0.5);
+  color:var(--gold)!important
+}
+
+/* Scrollbar ── themed */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:rgba(0,0,0,0.3)}
+::-webkit-scrollbar-thumb{background:rgba(0,229,255,0.2);border-radius:2px}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,229,255,0.35)}
+
+/* Selection ── branded */
+::selection{background:rgba(0,229,255,0.2);color:var(--text)}
+
 </style>
+<base target="_blank">
 </head>
 <body>
 <div class="app">
@@ -1184,6 +1312,7 @@ header{
       <button class="tab-btn active" onclick="switchTab('intel')" data-tab="intel">INTEL</button>
       <button class="tab-btn" onclick="switchTab('bids')" data-tab="bids">BIDS</button>
       <button class="tab-btn" onclick="switchTab('invoices')" data-tab="invoices" id="tabInvoices">INVOICES</button>
+      <button class="tab-btn" onclick="switchTab('myterrs')" data-tab="myterrs">MY TERRS</button>
       <button class="tab-btn" onclick="switchTab('rank')" data-tab="rank">RANK</button>
     </div>
 
@@ -1218,7 +1347,7 @@ header{
       <div class="section-title">Place Counter-Bid</div>
       <div class="bid-form">
         <div class="bid-row">
-          <input class="bid-input" id="bidInput" type="text" placeholder="$631,000" onkeydown="if(event.key==='Enter')placeBid()"/>
+          <input class="bid-input" id="bidInput" type="text" placeholder="$631,000" onkeydown="if(event.key==='Enter')placeBid()" oninput="formatBidInput(this)"/>
           <button class="bid-btn danger" id="bidBtn">COUNTER</button>
         </div>
         <div class="bid-min">MIN: <span style="color:var(--cyan)" id="minBid">$631,000</span> · CREDIT: <span style="color:var(--gold)" id="balSpan">APPLY</span></div>
@@ -1259,6 +1388,17 @@ header{
       <div class="data-grid">
         <div class="data-cell"><div class="data-label">Top Bidder</div><div class="data-value" id="epochTopBidder">-</div></div>
         <div class="data-cell"><div class="data-label">Total Volume</div><div class="data-value gold" id="epochVolume">$0</div></div>
+      </div>
+    </div>
+
+    <!-- MY TERRITORIES TAB -->
+    <div id="tabContent-myterrs" style="display:none">
+      <div class="section-title">Your Territories</div>
+      <div id="myTerritoriesList"></div>
+      <div class="section-title" style="margin-top:14px">Territory Value</div>
+      <div class="data-grid">
+        <div class="data-cell"><div class="data-label">Owned</div><div class="data-value" id="myTerrCount">0</div></div>
+        <div class="data-cell"><div class="data-label">Total Value</div><div class="data-value gold" id="myTerrValue">$0</div></div>
       </div>
     </div>
 
@@ -1343,13 +1483,13 @@ async function initAuth() {
   const { data: { session } } = await _sb.auth.getSession();
   currentUser = session?.user || null;
   if (currentUser) {
-    console.log('User loaded:', currentUser.email, 'Role:', currentUser?.app_metadata?.role || currentUser?.user_metadata?.role || 'none');
+    console.log('User loaded:', currentUser.email, 'Role:', currentUser?.app_metadata?.role || 'none');
     await loadUserDataFromSupabase();
   }
   _sb.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user || null;
     if (event === 'SIGNED_IN')  {
-      const detectedRole = currentUser?.app_metadata?.role || currentUser?.user_metadata?.role || currentUser?.raw_app_meta_data?.role || currentUser?.role || 'none';
+      const detectedRole = currentUser?.app_metadata?.role || 'none';
       console.log('Signed in:', currentUser?.email, 'Role:', detectedRole);
       showToast('✓ Authenticated — Role: ' + detectedRole, detectedRole === 'admin' ? 'success' : 'info');
       loadUserDataFromSupabase().then(() => { renderAll(); updateAuthUI(); });
@@ -1364,11 +1504,9 @@ async function initAuth() {
 
 function getUserId()   { return currentUser?.id || null; }
 function isAdmin() {
-  // Check multiple possible locations for the role
-  const role = currentUser?.app_metadata?.role
-            || currentUser?.user_metadata?.role
-            || currentUser?.raw_app_meta_data?.role
-            || currentUser?.role;
+  // SECURITY: only app_metadata (server-controlled, NOT user-editable) counts as admin proof.
+  // user_metadata is editable by the user themselves via supabase.auth.updateUser() — NEVER trust it for role checks.
+  const role = currentUser?.app_metadata?.role || currentUser?.raw_app_meta_data?.role;
   return role === 'admin';
 }
 function requireAuth() { if (!getUserId()) { openAuthModal(); return false; } return true; }
@@ -1621,6 +1759,7 @@ const DB = {
         billboard_url: t.imgL, billboard_mobile_url: t.imgP
       }, { onConflict: 'id' });
     } catch(e) { console.warn('DB.saveTerritory', e); }
+    saveLocalTerritories();
   },
   async loadEpoch() {
     if (!_sb) return null;
@@ -1657,7 +1796,8 @@ const DB = {
       await _sb.from('credit_accounts').upsert({
         user_id: getUserId(), status: ca.status, credit_limit: ca.limit,
         used: ca.used, available: ca.available, company_profile: ca.companyProfile,
-        invoice_ids: ca.invoices
+        invoice_ids: ca.invoices,
+        estimated_limit: ca.estimatedLimit || 0
       }, { onConflict: 'user_id' });
     } catch(e) { console.warn('DB.saveCreditAccount', e); }
   },
@@ -1731,6 +1871,8 @@ let lastCollectionCheck = 0;
 
 // ─── EPOCH SYSTEM ───
 function initEpoch() {
+  const local = Storage.get('epoch', null);
+  if (local) epochData = local;
   if (!epochData) {
     epochData = {
       number: 7,
@@ -1738,13 +1880,13 @@ function initEpoch() {
       status: 'ACTIVE',
       startedAt: Date.now(),
       endsAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      totalVolume: 2840000,
-      platformToll: 142000
+      totalVolume: 284000000,
+      platformToll: 14200000
     };
     Storage.set('epoch', epochData);
   }
-  // Auto-expire if stale
-  if (epochData.endsAt < Date.now()) {
+  // Auto-expire if stale (but don't auto-settle here — timer handles that)
+  if (epochData.endsAt < Date.now() && epochData.status === 'ACTIVE') {
     epochData.status = 'EXPIRED';
     Storage.set('epoch', epochData);
   }
@@ -1752,7 +1894,7 @@ function initEpoch() {
 
 function getEpochTimeRemaining() {
   const rem = Math.max(0, epochData.endsAt - Date.now());
-  if (rem === 0 && epochData.status !== 'EXPIRED') {
+  if (rem === 0 && epochData.status === 'ACTIVE') {
     epochData.status = 'EXPIRED';
     Storage.set('epoch', epochData);
   }
@@ -1760,7 +1902,8 @@ function getEpochTimeRemaining() {
   const h = Math.floor((rem % (24*60*60*1000)) / (60*60*1000));
   const m = Math.floor((rem % (60*60*1000)) / (60*1000));
   const s = Math.floor((rem % (60*1000)) / 1000);
-  return `${epochData.name} · ${String(d).padStart(2,'0')}d ${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+  const statusLabel = epochData.status === 'SETTLED' ? ' · SETTLED' : '';
+  return `${epochData.name}${statusLabel} · ${String(d).padStart(2,'0')}d ${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
 }
 
 setInterval(() => {
@@ -1770,6 +1913,10 @@ setInterval(() => {
     lastCollectionCheck = now;
     const changed = checkCollections();
     if (changed) renderAll();
+  }
+  // Auto-settle when epoch expires
+  if (epochData.endsAt < now && epochData.status === 'ACTIVE') {
+    autoSettleEpoch();
   }
 }, 1000);
 
@@ -1876,12 +2023,11 @@ function submitCreditApplication() {
   // Create application with PENDING status — requires admin review
   creditAccount = {
     status: 'PENDING',
-    limit: 0,              // No credit until approved
+    limit: 0,
     used: 0,
     available: 0,
-    estimatedLimit: estimatedLimit,  // System calculated max
-    requestedAmount: requestedAmount, // What user asked for
-    companyProfile: { company, reg, country, revenue, years, employees, website, email },
+    estimatedLimit: estimatedLimit,
+    companyProfile: { company, reg, country, revenue, years, employees, website, email, requestedAmount },
     paymentHistory: [],
     invoices: [],
     applicationId: 'ca_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -1925,36 +2071,118 @@ async function adminReviewCredit(applicationId, action, approvedLimit = 0, reaso
     });
   }
 
-  if (!targetAccount) {
-    showToast('Application not found in localStorage. Use SQL Editor to approve directly.', 'err');
-    return;
-  }
+  // Even without localStorage match, try direct Supabase update using applicationId as user_id
+  const targetUserId = (targetAccount && targetAccount.applicationId) || applicationId;
 
   if (action === 'approve') {
-    targetAccount.status = 'ACTIVE';
-    targetAccount.limit = approvedLimit > 0 ? approvedLimit : targetAccount.estimatedLimit;
-    targetAccount.available = targetAccount.limit;
-    targetAccount.reviewedAt = Date.now();
-    targetAccount.reviewedBy = getUserId();
-    targetAccount.rejectionReason = null;
-    Storage.set('creditAccount', targetAccount);
-    DB.saveCreditAccount(targetAccount);
-    notifyUserCreditApproved(targetAccount);
-    showToast('✓ Credit approved — ' + fmtMoney(targetAccount.limit), 'success');
+    const limit = approvedLimit > 0 ? approvedLimit : (targetAccount?.estimatedLimit || 0);
+    // Update Supabase directly (works once admin RLS policy is in place)
+    if (_sb && targetUserId) {
+      try {
+        const { error } = await _sb.from('credit_accounts').update({
+          status: 'ACTIVE',
+          credit_limit: limit,
+          available: limit,
+          used: 0
+        }).eq('user_id', targetUserId);
+        if (error) throw error;
+        showToast('✓ Credit approved in Supabase — ' + fmtMoney(limit), 'success');
+      } catch(e) {
+        showToast('Supabase update failed: ' + e.message + ' — Run admin RLS policy first', 'err');
+        console.error('adminReviewCredit approve:', e);
+      }
+    }
+    // Also update localStorage if this is the current user's account
+    if (targetAccount) {
+      targetAccount.status = 'ACTIVE';
+      targetAccount.limit = limit;
+      targetAccount.available = limit;
+      targetAccount.reviewedAt = Date.now();
+      targetAccount.reviewedBy = getUserId();
+      targetAccount.rejectionReason = null;
+      if (creditAccount && creditAccount.applicationId === applicationId) {
+        creditAccount = targetAccount;
+        Storage.set('creditAccount', creditAccount);
+      }
+    }
+    notifyUserCreditApproved(targetAccount || { companyProfile: {}, limit });
   } else if (action === 'reject') {
-    targetAccount.status = 'REJECTED';
-    targetAccount.limit = 0;
-    targetAccount.available = 0;
-    targetAccount.reviewedAt = Date.now();
-    targetAccount.reviewedBy = getUserId();
-    targetAccount.rejectionReason = reason || 'Application did not meet criteria';
-    Storage.set('creditAccount', targetAccount);
-    DB.saveCreditAccount(targetAccount);
-    notifyUserCreditRejected(targetAccount);
-    showToast('Application rejected', 'war');
+    if (_sb && targetUserId) {
+      try {
+        const { error } = await _sb.from('credit_accounts').update({
+          status: 'REJECTED',
+          credit_limit: 0,
+          available: 0
+        }).eq('user_id', targetUserId);
+        if (error) throw error;
+        showToast('Application rejected in Supabase', 'war');
+      } catch(e) {
+        showToast('Supabase update failed: ' + e.message, 'err');
+      }
+    }
+    if (targetAccount) {
+      targetAccount.status = 'REJECTED';
+      targetAccount.limit = 0;
+      targetAccount.available = 0;
+      targetAccount.reviewedAt = Date.now();
+      targetAccount.reviewedBy = getUserId();
+      targetAccount.rejectionReason = reason || 'Application did not meet criteria';
+      if (creditAccount && creditAccount.applicationId === applicationId) {
+        creditAccount = targetAccount;
+        Storage.set('creditAccount', creditAccount);
+      }
+    }
+    notifyUserCreditRejected(targetAccount || {});
   }
   renderAll();
   adminLoadCreditApplications(); // Refresh the list
+}
+
+// ─── DIRECT ADMIN APPROVE (bypasses localStorage, writes straight to Supabase) ───
+async function adminDirectApprove() {
+  if (!isAdmin()) { showToast('Admin only', 'err'); return; }
+  const userId = document.getElementById('directApproveUserId')?.value.trim();
+  const limitRaw = parseFloat(document.getElementById('directApproveLimit')?.value || '0');
+  if (!userId) { showToast('Enter a User ID', 'err'); return; }
+  if (!limitRaw || limitRaw <= 0) { showToast('Enter a valid credit limit', 'err'); return; }
+  if (!_sb) { showToast('Supabase not connected', 'err'); return; }
+  const limitCents = toCents(limitRaw);
+  try {
+    const { error } = await _sb.from('credit_accounts').update({
+      status: 'ACTIVE',
+      credit_limit: limitCents,
+      available: limitCents,
+      used: 0
+    }).eq('user_id', userId);
+    if (error) throw error;
+    showToast('✓ Credit approved for user — ' + fmtMoney(limitCents), 'success');
+    document.getElementById('directApproveUserId').value = '';
+    document.getElementById('directApproveLimit').value = '';
+    adminLoadCreditApplications();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'err');
+    console.error('adminDirectApprove:', e);
+  }
+}
+
+async function adminDirectReject() {
+  if (!isAdmin()) { showToast('Admin only', 'err'); return; }
+  const userId = document.getElementById('directApproveUserId')?.value.trim();
+  if (!userId) { showToast('Enter a User ID', 'err'); return; }
+  if (!_sb) { showToast('Supabase not connected', 'err'); return; }
+  const reason = prompt('Rejection reason:') || 'Did not meet criteria';
+  try {
+    const { error } = await _sb.from('credit_accounts').update({
+      status: 'REJECTED',
+      credit_limit: 0,
+      available: 0
+    }).eq('user_id', userId);
+    if (error) throw error;
+    showToast('Application rejected', 'war');
+    adminLoadCreditApplications();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'err');
+  }
 }
 
 // ─── NOTIFICATION SYSTEM ───
@@ -2018,6 +2246,7 @@ async function notifyAdminNewApplication(ca) {
     });
   } catch (e) {
     console.warn('Admin notification failed:', e.message);
+    if (isAdmin()) showToast('⚠ Email to admin failed — Edge Function not deployed?', 'err');
   }
   // Also add in-app notification for admin if they're online
   if (isAdmin()) {
@@ -2049,6 +2278,7 @@ async function notifyUserCreditApproved(ca) {
     });
   } catch (e) {
     console.warn('User email notification failed:', e.message);
+    if (isAdmin()) showToast('⚠ Approval email failed to send — check Edge Function deploy', 'err');
   }
 }
 
@@ -2071,6 +2301,7 @@ async function notifyUserCreditRejected(ca) {
     });
   } catch (e) {
     console.warn('User email notification failed:', e.message);
+    if (isAdmin()) showToast('⚠ Rejection email failed to send — check Edge Function deploy', 'err');
   }
 }
 
@@ -2169,7 +2400,7 @@ function updateCreditDisplay() {
 }
 
 // ─── BIDDING ENGINE ───
-function placeBid() {
+async function placeBid() {
   if (!requireAuth()) return;
   if (!creditAccount || creditAccount.status !== 'ACTIVE') {
     showToast('Apply for credit first', 'err');
@@ -2178,11 +2409,12 @@ function placeBid() {
   }
 
   const raw = document.getElementById('bidInput').value.replace(/[$,\s]/g, '');
-  const amt = toCents(parseFloat(raw));   // convert user dollars → cents
+  const amt = parseFloat(raw) || 0;       // keep in dollar space (matches hardcoded data)
   const t = TERRITORIES[current];
 
-  if (!amt || amt <= t.bid) {
-    showToast('Bid must exceed ' + fmtMoney(t.bid), 'err'); return;
+  const minBid = t.bid + CONFIG.MIN_BID_INCREMENT; // $1,000 minimum increment (cents)
+  if (!amt || amt < minBid) {
+    showToast('Bid must be at least ' + fmtMoney(minBid), 'err'); return;
   }
 
   const tollBuffer = Math.floor(amt * CONFIG.PLATFORM_TOLL_RATE);
@@ -2192,18 +2424,38 @@ function placeBid() {
     showToast('Insufficient credit. Available: ' + fmtMoney(creditAccount.available), 'err'); return;
   }
 
-  // Release previous bid credit on this territory if any
-  const prevBid = myBids.find(b => b.status === 'ACCEPTED' && b.territoryId === current);
-  if (prevBid) {
-    creditAccount.used -= (prevBid.amount + prevBid.tollBuffer);
-    creditAccount.available += (prevBid.amount + prevBid.tollBuffer);
-    prevBid.status = 'OUTBID';
+  // ── REAL MODE: server is the source of truth. The place_bid() Postgres function
+  // re-validates credit and the minimum bid atomically, so a manipulated browser
+  // session cannot bid beyond its real available credit. Run territoryx_security.sql
+  // in the Supabase SQL editor once to install this function. ──
+  if (_sb && !demoMode) {
+    const { data, error } = await _sb.rpc('place_bid', { p_territory_id: current, p_amount: Math.round(amt) });
+    if (error || !data || data.success === false) {
+      showToast((data && data.error) || (error && error.message) || 'Bid rejected by server', 'err');
+      return;
+    }
+    // Re-sync authoritative credit balance from the DB (fixes balances no longer
+    // resetting to full limit on refresh / other devices).
+    const fresh = await DB.loadCreditAccount();
+    if (fresh) { creditAccount = fresh; Storage.set('creditAccount', creditAccount); }
+    const prevBid = myBids.find(b => b.status === 'ACCEPTED' && b.territoryId === current);
+    if (prevBid) prevBid.status = 'OUTBID';
+  } else {
+    // ── DEMO / OFFLINE MODE: original local-only math (no real money/credit at stake) ──
+    const prevBid = myBids.find(b => b.status === 'ACCEPTED' && b.territoryId === current);
+    if (prevBid) {
+      creditAccount.used -= (prevBid.amount + prevBid.tollBuffer);
+      creditAccount.available += (prevBid.amount + prevBid.tollBuffer);
+      prevBid.status = 'OUTBID';
+    }
+    if (!demoMode) {
+      creditAccount.used += totalRequired;
+      creditAccount.available -= totalRequired;
+      Storage.set('creditAccount', creditAccount);
+    } else {
+      showToast('DEMO BID — no credit deducted', 'war');
+    }
   }
-
-  // Deduct credit
-  creditAccount.used += totalRequired;
-  creditAccount.available -= totalRequired;
-  Storage.set('creditAccount', creditAccount);
 
   // Record bid
   const bidRecord = {
@@ -2215,7 +2467,7 @@ function placeBid() {
   };
   myBids.push(bidRecord);
   Storage.set('myBids', myBids);
-  DB.saveBid(bidRecord);  // sync to Supabase
+  if (!(_sb && !demoMode)) DB.saveBid(bidRecord);  // real mode already inserted the bid inside place_bid()
 
   // Update territory
   t.bid = amt;
@@ -2225,12 +2477,22 @@ function placeBid() {
   t.history.unshift({
     co: creditAccount.companyProfile.company,
     c: '#00F2FE',
-    amt: '$' + amt.toLocaleString(),
+    amt: fmtMoney(amt),
     t: 'just now'
   });
   t.threat = Math.max(1, t.threat - 2);
   t.ownDays = 1;
   DB.saveTerritory(current);  // broadcast bid to all users
+  saveLocalTerritories();
+
+  // Sudden death extension
+  if (t.sudden) {
+    epochData.endsAt = Math.max(epochData.endsAt, Date.now() + CONFIG.SUDDEN_DEATH_EXTENSION * 1000);
+    epochData.status = 'ACTIVE';
+    Storage.set('epoch', epochData);
+    DB.saveEpoch(epochData);
+    showToast('⚡ SUDDEN DEATH — Epoch extended 15 min', 'war');
+  }
 
   triggerTakeover('#00F2FE');
   setTimeout(() => renderAll(), 200);
@@ -2255,8 +2517,8 @@ function generateInvoiceNumber() {
 
 function generateInvoice(territoryId, bidAmount) {
   const t = TERRITORIES[territoryId];
-  const toll = Math.floor(bidAmount * CONFIG.PLATFORM_TOLL_RATE);  // cents
-  const total = bidAmount + toll;                                   // cents
+  const toll = Math.floor(bidAmount * CONFIG.PLATFORM_TOLL_RATE);  // dollars
+  const total = bidAmount + toll;                                   // dollars
   const now = Date.now();
 
   const invoice = {
@@ -2292,10 +2554,13 @@ function generateInvoice(territoryId, bidAmount) {
 
   invoices.push(invoice);
   Storage.set('invoices', invoices);
+  DB.saveInvoice(invoice);
 
-  revenue.total += total;
-  revenue.toll += toll;
-  Storage.set('revenue', revenue);
+  if (!demoMode) {
+    revenue.total += total;
+    revenue.toll += toll;
+    Storage.set('revenue', revenue);
+  }
 
   if (creditAccount) {
     creditAccount.invoices.push(invoice._id);
@@ -2305,13 +2570,21 @@ function generateInvoice(territoryId, bidAmount) {
   return invoice;
 }
 
-function settleEpoch() {
+
+// ─── AUTO EPOCH SETTLEMENT ───
+function autoSettleEpoch() {
+  if (epochData.status !== 'ACTIVE') return;
+  if (epochData.endsAt > Date.now()) return;
+
   let count = 0;
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
     if (t.brand === (creditAccount?.companyProfile?.company || 'Your Company')) {
-      generateInvoice(id, t.bid);
-      count++;
+      const existing = invoices.find(i => i.territoryId === id && i.epochId === epochData.number);
+      if (!existing) {
+        generateInvoice(id, t.bid);
+        count++;
+      }
     }
   });
 
@@ -2323,6 +2596,7 @@ function settleEpoch() {
   epochData.platformToll = 0;
   epochData.status = 'ACTIVE';
   Storage.set('epoch', epochData);
+  DB.saveEpoch(epochData);
 
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
@@ -2331,7 +2605,63 @@ function settleEpoch() {
     t.sudden = false;
     t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
     t.ownDays = 0;
+    t.brand = 'UNCLAIMED';
+    t.color = '#666';
+    DB.saveTerritory(id);
   });
+  saveLocalTerritories();
+
+  myBids.forEach(b => { if (b.status === 'ACCEPTED') b.status = 'EXPIRED'; });
+  Storage.set('myBids', myBids);
+
+  if (creditAccount) {
+    creditAccount.used = 0;
+    creditAccount.available = creditAccount.limit;
+    Storage.set('creditAccount', creditAccount);
+  }
+
+  showToast(`✓ EPOCH ${epochData.number - 1} AUTO-SETTLED — ${count} invoices generated`, 'success');
+  renderAll();
+  updateHeaderStats();
+}
+
+function settleEpoch() {
+  if (epochData.status === 'SETTLED') { showToast('Epoch already settled', 'war'); return; }
+  let count = 0;
+  ORDER.forEach(id => {
+    const t = TERRITORIES[id];
+    if (t.brand === (creditAccount?.companyProfile?.company || 'Your Company')) {
+      const existing = invoices.find(i => i.territoryId === id && i.epochId === epochData.number);
+      if (!existing) {
+        generateInvoice(id, t.bid);
+        count++;
+      }
+    }
+  });
+  epochData.status = 'SETTLED';
+
+  epochData.number++;
+  epochData.name = 'EPOCH ' + String(epochData.number).padStart(2, '0');
+  epochData.startedAt = Date.now();
+  epochData.endsAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  epochData.totalVolume = 0;
+  epochData.platformToll = 0;
+  epochData.status = 'ACTIVE';
+  Storage.set('epoch', epochData);
+  DB.saveEpoch(epochData);
+
+  ORDER.forEach(id => {
+    const t = TERRITORIES[id];
+    t.bid = Math.floor(t.bid * 0.1);
+    if (t.bid < 8000) t.bid = 8000;
+    t.sudden = false;
+    t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
+    t.ownDays = 0;
+    t.brand = 'UNCLAIMED';
+    t.color = '#666';
+    DB.saveTerritory(id);
+  });
+  saveLocalTerritories();
 
   myBids.forEach(b => { if (b.status === 'ACCEPTED') b.status = 'EXPIRED'; });
   Storage.set('myBids', myBids);
@@ -2368,13 +2698,15 @@ function checkCollections() {
           amount: lateFee,
           type: 'LATE_FEE'
         });
-        revenue.late += lateFee;
-        Storage.set('revenue', revenue);
+        if (!demoMode) {
+          revenue.late += lateFee;
+          Storage.set('revenue', revenue);
+        }
       }
     }
 
     if (inv.status === 'OVERDUE' && now > inv.dueDate + CONFIG.SUSPENSION_DAYS * 24 * 60 * 60 * 1000) {
-      if (creditAccount && creditAccount.status === 'ACTIVE') {
+      if (creditAccount && creditAccount.status === 'ACTIVE' && !demoMode) {
         creditAccount.status = 'SUSPENDED';
         Storage.set('creditAccount', creditAccount);
         changed = true;
@@ -2397,6 +2729,7 @@ function checkCollections() {
 }
 
 function markInvoicePaid(invoiceId) {
+  if (!isAdmin()) { showToast('Only an admin can confirm payment received', 'err'); return; }
   const inv = invoices.find(i => i._id === invoiceId);
   if (!inv) return;
 
@@ -2409,16 +2742,22 @@ function markInvoicePaid(invoiceId) {
     amount: inv.total,
     method: 'BANK_TRANSFER',
     reference: 'MANUAL_' + Date.now(),
-    paidAt: Date.now()
+    paidAt: Date.now(),
+    confirmedBy: getUserId()
   });
 
-  revenue.collected += inv.total;
-  Storage.set('revenue', revenue);
+  if (!demoMode) {
+    revenue.collected += inv.total;
+    Storage.set('revenue', revenue);
+  }
   Storage.set('invoices', invoices);
+  DB.saveInvoice(inv); // SECURITY FIX: previously this only updated localStorage, so the PAID
+                        // status never reached Supabase and other devices/admins never saw it.
 
   if (creditAccount && creditAccount.status === 'SUSPENDED') {
     creditAccount.status = 'ACTIVE';
     Storage.set('creditAccount', creditAccount);
+    DB.saveCreditAccount(creditAccount);
   }
 
   showToast('✓ Invoice ' + inv.invoiceNumber + ' marked PAID', 'success');
@@ -2462,6 +2801,31 @@ function loadBillboardImage(t) {
     }
   };
   temp.src = src;
+}
+
+function renderMyTerritories() {
+  const list = document.getElementById('myTerritoriesList');
+  const countEl = document.getElementById('myTerrCount');
+  const valueEl = document.getElementById('myTerrValue');
+  if (!list) return;
+  const myCompany = creditAccount?.companyProfile?.company || 'Your Company';
+  const owned = ORDER.map(id => ({id, ...TERRITORIES[id]})).filter(t => t.brand === myCompany);
+  if (countEl) countEl.textContent = owned.length;
+  const totalValue = owned.reduce((sum, t) => sum + (t.bid || 0), 0);
+  if (valueEl) valueEl.textContent = fmtMoney(totalValue);
+  if (!owned.length) {
+    list.innerHTML = '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:12px 0;text-align:center">No territories owned yet. Place a bid to claim one.</div>';
+    return;
+  }
+  list.innerHTML = owned.map(t => `
+    <div class="inv-row" style="cursor:pointer" onclick="selectManual('${t.id}')">
+      <div class="inv-left" style="flex:2">
+        <div class="inv-num">${t.city}, ${t.country}</div>
+        <div class="inv-meta">${t.tier} · ${t.ownDays} days owned · ${fmtMoney(t.bid)}</div>
+      </div>
+      <div class="sd-dot" style="background:${t.color};width:8px;height:8px;border-radius:50%"></div>
+    </div>
+  `).join('');
 }
 
 function renderAll() {
@@ -2557,21 +2921,9 @@ function renderAll() {
   ).join('') || '<div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);padding:6px 0">No recent bids</div>';
 
   // Your active bids — mark OUTBID if current bid is higher
+  releaseOutbidCredit();
   const yourBidsEl = document.getElementById('yourBids');
   if (yourBidsEl) {
-    myBids.forEach(b => {
-      if (b.status === 'ACCEPTED' && b.territoryId === current) {
-        if (b.amount < t.bid && t.brand !== (creditAccount?.companyProfile?.company || 'You')) {
-          b.status = 'OUTBID';
-          // Release credit
-          creditAccount.used -= (b.amount + b.tollBuffer);
-          creditAccount.available += (b.amount + b.tollBuffer);
-          Storage.set('creditAccount', creditAccount);
-          Storage.set('myBids', myBids);
-        }
-      }
-    });
-
     const yourActive = myBids.filter(b => b.territoryId === current).sort((a,b) => b.timestamp - a.timestamp);
     yourBidsEl.innerHTML = yourActive.map(b =>
       `<div class="bh-row"><div class="bh-left"><div class="bh-dot" style="background:${b.status==='OUTBID'?'#EF4444':b.status==='EXPIRED'?'#F59E0B':'#00F2FE'}"></div><div><div class="bh-co">${creditAccount?.companyProfile?.company || 'You'}</div><div class="bh-time">${b.status} · ${new Date(b.timestamp).toLocaleTimeString()}</div></div></div><div class="bh-amt">${fmtMoney(b.amount)}</div></div>`
@@ -2750,7 +3102,7 @@ function showInvoiceDetail(invId) {
         ${inv.balanceDue > 0 ? `<tr><td colspan="2" style="color:var(--muted)">BALANCE DUE</td><td style="color:var(--red);font-weight:700">${fmtMoney(inv.balanceDue)}</td></tr>` : ''}
       </table>
       <div class="inv-actions">
-        ${inv.status !== 'PAID' ? `<button class="btn btn-primary" onclick="markInvoicePaid('${inv._id}');closeModal('invoiceModal')">MARK AS PAID (TEST)</button>` : ''}
+        ${inv.status !== 'PAID' && isAdmin() ? `<button class="btn btn-primary" onclick="markInvoicePaid('${inv._id}');closeModal('invoiceModal')">ADMIN: CONFIRM PAYMENT RECEIVED</button>` : ''}
         <button class="btn btn-secondary" onclick="downloadInvoicePDF('${inv._id}')">DOWNLOAD PDF</button>
       </div>
       ${inv.status === 'PAID' ? `
@@ -2786,41 +3138,65 @@ function downloadInvoicePDF(invId) {
   const inv = invoices.find(i => i._id === invId);
   if (!inv) return;
 
-  const content = `
-TERRITORYX AFRICA LTD
-Invoice #${inv.invoiceNumber}
-Date: ${new Date(inv.issuedAt).toLocaleDateString()}
-Due: ${new Date(inv.dueDate).toLocaleDateString()}
+  if (typeof window.jspdf === 'undefined') {
+    showToast('PDF library failed to load — check your connection', 'err');
+    return;
+  }
 
-BILLED TO:
-${inv.billedTo.companyName}
-${inv.billedTo.email}
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const left = 48; let y = 56;
 
-TERRITORY: ${inv.territoryName}
-EPOCH: ${epochData.name}
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20);
+  doc.text('TERRITORYX', left, y); y += 28;
 
-LINE ITEMS:
-${inv.lineItems.map(li => `${li.description}: $${li.amount.toLocaleString()}`).join('\n')}
+  doc.setFontSize(12); doc.text(`Invoice #${inv.invoiceNumber}`, left, y); y += 16;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.text(`Date: ${new Date(inv.issuedAt).toLocaleDateString()}`, left, y); y += 14;
+  doc.text(`Due: ${new Date(inv.dueDate).toLocaleDateString()}`, left, y); y += 14;
+  doc.text(`Status: ${inv.status}`, left, y); y += 24;
 
-TOTAL: ${fmtMoney(inv.total)}
-BALANCE DUE: ${fmtMoney(inv.balanceDue)}
+  doc.setFont('helvetica', 'bold'); doc.text('Billed To', left, y); y += 14;
+  doc.setFont('helvetica', 'normal');
+  doc.text(inv.billedTo.companyName, left, y); y += 14;
+  doc.text(inv.billedTo.email, left, y); y += 24;
 
-PAYMENT:
-Bank: First National Bank
-Account: 1234567890
-Reference: ${inv.invoiceNumber}
+  doc.setFont('helvetica', 'bold');
+  doc.text('Territory', left, y); doc.text('Epoch', left + 220, y); y += 14;
+  doc.setFont('helvetica', 'normal');
+  doc.text(inv.territoryName, left, y); doc.text(epochData.name, left + 220, y); y += 24;
 
-Questions: finance@territoryx.africa
-  `;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text('Description', left, y); doc.text('Qty', left + 320, y); doc.text('Amount', left + 400, y);
+  y += 8; doc.line(left, y, left + 480, y); y += 16;
+  doc.setFont('helvetica', 'normal');
+  inv.lineItems.forEach(li => {
+    doc.text(li.description, left, y);
+    doc.text(String(li.quantity), left + 320, y);
+    doc.text(fmtMoney(li.amount), left + 400, y);
+    y += 18;
+  });
+  y += 4; doc.line(left, y, left + 480, y); y += 18;
 
-  const blob = new Blob([content], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${inv.invoiceNumber}.txt`;
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Invoice downloaded', 'success');
+  doc.setFont('helvetica', 'bold');
+  doc.text('TOTAL', left + 320, y); doc.text(fmtMoney(inv.total), left + 400, y); y += 16;
+  if (inv.balanceDue > 0) {
+    doc.setTextColor(200, 30, 30);
+    doc.text('BALANCE DUE', left + 320, y); doc.text(fmtMoney(inv.balanceDue), left + 400, y);
+    doc.setTextColor(0, 0, 0); y += 16;
+  }
+  y += 24;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text('Payment Instructions', left, y); y += 14;
+  doc.setFont('helvetica', 'normal');
+  doc.text('Bank: First National Bank', left, y); y += 14;
+  doc.text('Account: 1234567890', left, y); y += 14;
+  doc.text(`Reference: ${inv.invoiceNumber}`, left, y); y += 14;
+  doc.text('Questions: finance@territoryx.africa', left, y);
+
+  doc.save(`${inv.invoiceNumber}.pdf`);
+  showToast('Invoice PDF downloaded', 'success');
 }
 
 // ─── ADMIN PANEL ───
@@ -3037,14 +3413,14 @@ async function adminLoadCreditApplications() {
 
   const apps = [];
 
-  // Try Supabase first — query ALL credit_accounts (requires RLS bypass or Edge Function)
+  // Try Supabase — show ALL non-rejected statuses (needs admin RLS policy to see other users)
   if (_sb) {
     try {
-      const { data, error } = await _sb.from('credit_accounts').select('*').eq('status', 'PENDING');
+      const { data, error } = await _sb.from('credit_accounts').select('*').neq('status', 'REJECTED');
       if (!error && data && data.length) {
         data.forEach(row => {
           apps.push({
-            applicationId: row.user_id || 'db_' + row.created_at,
+            applicationId: row.user_id,
             status: row.status,
             estimatedLimit: row.credit_limit || 0,
             requestedAmount: row.company_profile?.requestedAmount || row.credit_limit || 0,
@@ -3064,25 +3440,38 @@ async function adminLoadCreditApplications() {
       if (k.startsWith('tx_creditAccount')) {
         try {
           const ca = JSON.parse(localStorage.getItem(k));
-          if (ca && ca.status === 'PENDING') apps.push(ca);
+          if (ca && ca.status && ca.status !== 'REJECTED') apps.push(ca);
         } catch(e) {}
       }
     });
   }
 
+  // Always show the Direct Approve tool regardless of whether apps loaded
+  const manualApproveHtml = `
+    <div style="margin-top:12px;padding:12px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:3px">
+      <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--gold);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Direct Approve by User ID</div>
+      <div style="font-family:IBM Plex Mono;font-size:9px;color:var(--muted);margin-bottom:8px;line-height:1.6">Paste the user_id UUID from Supabase Table Editor and set the approved credit limit.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input class="form-input" type="text" id="directApproveUserId" placeholder="User ID (UUID from Supabase)" style="flex:2;min-width:180px;font-size:10px;padding:5px 8px"/>
+        <input class="form-input" type="number" id="directApproveLimit" placeholder="Limit e.g. 5000" style="flex:1;min-width:100px;font-size:10px;padding:5px 8px"/>
+        <button class="btn btn-primary btn-sm" onclick="adminDirectApprove()">APPROVE</button>
+        <button class="btn btn-danger btn-sm" onclick="adminDirectReject()">REJECT</button>
+      </div>
+      <div style="margin-top:10px;font-family:IBM Plex Mono;font-size:8px;color:var(--muted);line-height:1.8">
+        <strong style="color:var(--text)">Run once in Supabase SQL Editor to enable admin access:</strong><br>
+        <code style="color:var(--cyan)">CREATE POLICY "admin_credit_all" ON credit_accounts FOR ALL USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');</code>
+      </div>
+    </div>
+  `;
+
   if (!apps.length) {
     container.innerHTML = `
-      <div style="padding:12px;background:rgba(0,242,254,0.03);border:1px solid var(--border);border-radius:3px">
+      <div style="padding:12px;background:rgba(0,242,254,0.03);border:1px solid var(--border);border-radius:3px;margin-bottom:4px">
         <div style="font-family:IBM Plex Mono;font-size:10px;color:var(--muted);line-height:1.6">
-          No pending applications visible.<br><br>
-          <strong style="color:var(--text)">To approve applications from other users:</strong><br>
-          1. Open Supabase SQL Editor<br>
-          2. Run: <code style="color:var(--cyan)">SELECT * FROM credit_accounts WHERE status = 'PENDING';</code><br>
-          3. Note the <strong>user_id</strong> and desired limit<br>
-          4. Run: <code style="color:var(--cyan)">UPDATE credit_accounts SET status = 'ACTIVE', credit_limit = 5000000, available = 5000000 WHERE user_id = 'USER_ID_HERE';</code><br><br>
-          <strong style="color:var(--gold)">Or deploy the admin-users Edge Function for full UI control.</strong>
+          No applications visible — RLS is blocking cross-user reads.<br>Run the SQL policy below, then use Direct Approve.
         </div>
       </div>
+      ${manualApproveHtml}
     `;
     return;
   }
@@ -3112,7 +3501,7 @@ async function adminLoadCreditApplications() {
         <button class="btn btn-danger btn-sm" onclick="adminReviewCredit('${app.applicationId}', 'reject', 0, prompt('Rejection reason:') || '')">REJECT</button>
       </div>
     </div>
-  `).join('');
+  `).join('') + manualApproveHtml;
 }
 
 function adminRenderUsers(users) {
@@ -3164,23 +3553,26 @@ function adminOverrideTerritory() {
   t.history.unshift({ co: 'ADMIN OVERRIDE', c: '#00F2FE', amt: fmtMoney(bid), t: 'just now' });
   Storage.set('territories', TERRITORIES);
   DB.saveTerritory(id);
+  saveLocalTerritories();
   triggerTakeover('#00F2FE');
   showToast(`✓ ${t.city} overridden to ${brand}`, 'success');
   renderAll();
 }
 
 function adminForceSync() {
-  if (!_sb) { showToast('Supabase offline', 'err'); return; }
+  saveLocalTerritories();
+  if (!_sb) { showToast('Supabase offline — saved locally', 'war'); return; }
   ORDER.forEach(id => DB.saveTerritory(id));
   DB.saveEpoch(epochData);
   showToast('✓ All territories synced to Supabase', 'success');
 }
 
-let demoMode = false;
+let demoMode = Storage.get('demoMode', false);
 function adminToggleDemo() {
   demoMode = !demoMode;
   const val = document.getElementById('demoModeVal');
   if (val) { val.textContent = demoMode ? 'ON' : 'OFF'; val.style.color = demoMode ? 'var(--gold)' : 'var(--text)'; }
+  Storage.set('demoMode', demoMode);
   showToast(demoMode ? 'Demo mode ON — no real transactions' : 'Demo mode OFF', demoMode ? 'war' : 'success');
 }
 
@@ -3220,6 +3612,7 @@ function importData(e) {
   reader.onload = (ev) => {
     try {
       Storage.importAll(ev.target.result);
+      loadLocalTerritories();
       showToast('Data imported — reloading', 'success');
       setTimeout(() => location.reload(), 800);
     } catch(err) {
@@ -3233,10 +3626,11 @@ function importData(e) {
 function switchTab(tab) {
   activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  ['intel','bids','invoices','rank'].forEach(t => {
+  ['intel','bids','invoices','rank','myterrs'].forEach(t => {
     const el = document.getElementById('tabContent-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
+  if (tab === 'myterrs') renderMyTerritories();
 }
 
 // ─── TAKEOVER ANIMATION ───
@@ -3689,15 +4083,19 @@ setInterval(() => {
   const inc = Math.floor(Math.random() * 15 + 5) * 100000;  // $5K–$20K in cents
   if (botCreditPool < inc) return;
 
-  botCreditPool -= inc;
-  Storage.set('botPool', botCreditPool);
+  if (!demoMode) {
+    botCreditPool -= inc;
+    Storage.set('botPool', botCreditPool);
+  }
 
   t.bid += inc;
   const idx = Math.floor(Math.random() * CONFIG.BOT_NAMES.length);
   const co = CONFIG.BOT_NAMES[idx];
   const color = CONFIG.BOT_COLORS[idx];
-  t.history.unshift({co, c:color, amt:'$'+t.bid.toLocaleString(), t:'just now'});
+  t.history.unshift({co, c:color, amt: fmtMoney(t.bid), t:'just now'});
   if (t.threat < 10) t.threat++;
+  DB.saveTerritory(id);
+  saveLocalTerritories();
   if (id === current) renderAll();
 }, 10000);
 
@@ -4018,7 +4416,66 @@ async function submitNewPassword() {
   }
 }
 
+// ─── LOCAL TERRITORY PERSISTENCE ───
+function saveLocalTerritories() {
+  const data = {};
+  ORDER.forEach(id => {
+    const t = TERRITORIES[id];
+    data[id] = {
+      bid: t.bid, brand: t.brand, color: t.color, tagline: t.tagline,
+      threat: t.threat, ownDays: t.ownDays, sudden: t.sudden,
+      history: t.history.slice(0, 20), challengers: t.challengers.slice(0, 10),
+      imgL: t.imgL, imgP: t.imgP
+    };
+  });
+  Storage.set('territories', data);
+}
+
+function loadLocalTerritories() {
+  const local = Storage.get('territories', null);
+  if (!local) return;
+  Object.keys(local).forEach(id => {
+    if (TERRITORIES[id] && local[id]) {
+      const t = TERRITORIES[id];
+      const l = local[id];
+      if (l.bid != null) t.bid = l.bid;
+      if (l.brand != null) t.brand = l.brand;
+      if (l.color != null) t.color = l.color;
+      if (l.tagline != null) t.tagline = l.tagline;
+      if (l.threat != null) t.threat = l.threat;
+      if (l.ownDays != null) t.ownDays = l.ownDays;
+      if (l.sudden != null) t.sudden = l.sudden;
+      if (l.history) t.history = l.history;
+      if (l.challengers) t.challengers = l.challengers;
+      if (l.imgL) t.imgL = l.imgL;
+      if (l.imgP) t.imgP = l.imgP;
+    }
+  });
+}
+
+// ─── OUTBID CREDIT RELEASE (global scan) ───
+function releaseOutbidCredit() {
+  if (!creditAccount) return;
+  let changed = false;
+  myBids.forEach(b => {
+    if (b.status === 'ACCEPTED') {
+      const t = TERRITORIES[b.territoryId];
+      if (t && b.amount < t.bid && t.brand !== (creditAccount?.companyProfile?.company || 'Your Company')) {
+        creditAccount.used -= (b.amount + b.tollBuffer);
+        creditAccount.available += (b.amount + b.tollBuffer);
+        b.status = 'OUTBID';
+        changed = true;
+      }
+    }
+  });
+  if (changed) {
+    Storage.set('creditAccount', creditAccount);
+    Storage.set('myBids', myBids);
+  }
+}
+
 // ─── INIT ───
+loadLocalTerritories();
 initEpoch();
 initStratMap();
 initAuth();          // Initialize Supabase Auth before any data ops
@@ -4026,7 +4483,7 @@ renderAll();         // Render default immediately so page isn't blank
 detectLocation();
 checkOrientation();
 updateHeaderStats();
-handlePasswordRecovery(); // Check for reset token in URL
+setTimeout(() => handlePasswordRecovery(), 800); // Check for reset token after auth init
 
 window.addEventListener('resize', () => {
   if (window.innerWidth >= 768) {
@@ -4052,7 +4509,9 @@ async function initSupabase() {
     return;
   }
   showToast('Connecting to live server…', 'info');
+  loadLocalTerritories();
   await DB.loadTerritories();
+  saveLocalTerritories();
   const dbEpoch = await DB.loadEpoch();
   if (dbEpoch) {
     epochData = {
@@ -4075,12 +4534,14 @@ async function initSupabase() {
 
 async function loadUserDataFromSupabase() {
   if (!_sb || !getUserId()) return;
-  // Load credit account for THIS user only
+  const localCA = creditAccount;
   const dbCredit = await DB.loadCreditAccount();
   if (dbCredit) {
     creditAccount = dbCredit;
+  } else if (localCA && localCA.status === 'PENDING') {
+    // Keep local pending application until Supabase syncs
   } else {
-    creditAccount = null; // No credit account for this user
+    creditAccount = null;
   }
   // Load bids for THIS user only
   const dbBids = await DB.loadBids();
@@ -4287,132 +4748,25 @@ CREATE POLICY "epochs_public_read" ON epochs FOR SELECT USING (true);
   </div>
 </div>
 
-
 <!--
 ═══════════════════════════════════════════════════════════════════════════════
-EDGE FUNCTION TEMPLATE: admin-users
+DEPLOYMENT — REQUIRED BEFORE REAL BIDDERS GO LIVE
 ═══════════════════════════════════════════════════════════════════════════════
+This file alone is NOT enough to safely take real bids/credit. Two things must
+be deployed to your Supabase project — they are NOT optional:
 
-Deploy this to Supabase so the admin panel can list/manage users.
+1. RUN territoryx_security.sql in Supabase Dashboard → SQL Editor → New query.
+   This installs:
+   - Admin RLS policies (lets the admin panel see/approve credit applications)
+   - The place_bid() function — the server-side source of truth for credit
+     checks, so a manipulated browser session cannot bid beyond real available
+     credit, and credit balances stay in sync across devices/refreshes.
 
-1. Install Supabase CLI:
-   npm install -g supabase
-
-2. Login:
-   supabase login
-
-3. Link your project:
-   supabase link --project-ref YOUR_PROJECT_REF
-
-4. Create the function:
-   supabase functions new admin-users
-
-5. Paste this into supabase/functions/admin-users/index.ts:
-
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-serve(async (req) => {
-  const { action, email, role } = await req.json()
-  const authHeader = req.headers.get('Authorization')
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    { global: { headers: { Authorization: authHeader! } } }
-  )
-
-  // Verify caller is admin
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user || user.app_metadata?.role !== 'admin') {
-    return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403 })
-  }
-
-  if (action === 'list') {
-    const { data, error } = await supabase.auth.admin.listUsers()
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
-    const users = data.users.map(u => ({
-      id: u.id,
-      email: u.email,
-      company_name: u.user_metadata?.company_name || 'Unknown',
-      role: u.app_metadata?.role || 'user',
-      created_at: u.created_at
-    }))
-    return new Response(JSON.stringify({ users }), { headers: { 'Content-Type': 'application/json' } })
-  }
-
-  if (action === 'setRole') {
-    const { data: userData } = await supabase.auth.admin.listUsers()
-    const target = userData.users.find(u => u.email === email)
-    if (!target) return new Response(JSON.stringify({ error: 'User not found' }), { status: 404 })
-    const { error } = await supabase.auth.admin.updateUserById(target.id, {
-      app_metadata: { ...target.app_metadata, role }
-    })
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
-    return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } })
-  }
-
-  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400 })
-})
-
-6. Deploy:
-   supabase functions deploy admin-users
-
-7. Set service_role key in Supabase Dashboard → Edge Functions → Secrets:
-   SUPABASE_SERVICE_ROLE_KEY = your_service_role_key
-
-═══════════════════════════════════════════════════════════════════════════════
--->
-
-
-<!--
-═══════════════════════════════════════════════════════════════════════════════
-EDGE FUNCTION TEMPLATE: notify-user + notify-admin (Email Notifications)
-═══════════════════════════════════════════════════════════════════════════════
-
-1. Create the function:
-   supabase functions new notify-user
-
-2. Paste into supabase/functions/notify-user/index.ts:
-
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-serve(async (req) => {
-  const { type, to, company, limit, reason } = await req.json()
-
-  // Use Resend, SendGrid, or any email provider
-  // Example with Resend (get API key from resend.com):
-  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-
-  let subject, html
-  if (type === 'credit_approved') {
-    subject = 'TerritoryX — Credit Approved'
-    html = `<h2>Congratulations ${company}!</h2><p>Your credit application has been approved.</p><p><strong>Credit Limit:</strong> $${(limit/100).toLocaleString()}</p><p>You can now start bidding on territories.</p><p><a href="https://your-render-url.com">Go to War Room</a></p>`
-  } else if (type === 'credit_rejected') {
-    subject = 'TerritoryX — Credit Application Update'
-    html = `<h2>Hello ${company},</h2><p>Your credit application was not approved at this time.</p><p><strong>Reason:</strong> ${reason}</p><p>You may reapply with updated information.</p>`
-  } else {
-    return new Response('Unknown type', { status: 400 })
-  }
-
-  if (RESEND_API_KEY) {
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: 'TerritoryX <finance@territoryx.africa>', to, subject, html })
-    })
-  }
-
-  return new Response('OK')
-})
-
-3. Deploy:
-   supabase functions deploy notify-user
-
-4. Set secret:
-   supabase secrets set RESEND_API_KEY=your_resend_api_key
-
+2. DEPLOY the notify-user and notify-admin Edge Functions (full code in
+   territoryx_edge_functions.md, generated alongside this file) so credit
+   approval/rejection emails actually send via Resend. Until deployed, the
+   app will show a visible "⚠ email failed" toast to admins so you know
+   it's not wired up yet — it will NOT fail silently.
 ═══════════════════════════════════════════════════════════════════════════════
 -->
 
