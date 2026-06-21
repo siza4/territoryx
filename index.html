@@ -971,7 +971,6 @@ header{
 ::selection{background:rgba(0,229,255,0.2);color:var(--text)}
 
 </style>
-<base target="_blank">
 </head>
 <body>
 <div class="app">
@@ -1437,9 +1436,9 @@ const toCents   = (dollars) => Math.round(dollars * 100);
 const fromCents = (cents)   => cents / 100;
 const fmtMoney  = (cents)   => {
   const n = fromCents(cents);
-  if (n >= 1000000) return '$' + (n/1000000).toFixed(2) + 'M';
-  if (n >= 1000)    return '$' + Math.round(n/1000) + 'K';
-  return '$' + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (n >= 1000000) return CURRENCY.DISPLAY + (n/1000000).toFixed(2) + 'M';
+  if (n >= 1000)    return CURRENCY.DISPLAY + Math.round(n/1000) + 'K';
+  return CURRENCY.DISPLAY + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
 };
 
 // ─── CONFIG ───
@@ -1460,7 +1459,12 @@ const CONFIG = {
   },
   BOT_NAMES: ['Rival Corp','Competitor A','Market Leader Co','Global Telecom X','Frontier Networks','Digital Africa Ltd','NextGen Mobile','Continental Wireless','Savanna Telecom','Nile Networks'],
   BOT_COLORS: ['#A78BFA','#F472B6','#22D3EE','#FBBF24','#A3E635','#FB923C','#E879F9','#38BDF8','#34D399','#F87171'],
-  BOT_CREDIT_POOL: toCents(2000000)  // $2M → 200,000,000 cents (shared bot pool)
+  BOT_CREDIT_POOL: toCents(2000000),  // $2M → 200,000,000 cents (shared bot pool)
+  // Your territoryx-api Render URL, e.g. 'https://territoryx-api.onrender.com'
+  // Leave blank to fall back to direct-Supabase calls (works, but admin actions
+  // depend on the RLS policies in territoryx_security.sql being run correctly).
+  // Once set, admin actions/email/PDF route through the secured Express API instead.
+  API_BASE: ''
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1796,8 +1800,7 @@ const DB = {
       await _sb.from('credit_accounts').upsert({
         user_id: getUserId(), status: ca.status, credit_limit: ca.limit,
         used: ca.used, available: ca.available, company_profile: ca.companyProfile,
-        invoice_ids: ca.invoices,
-        estimated_limit: ca.estimatedLimit || 0
+        invoice_ids: ca.invoices
       }, { onConflict: 'user_id' });
     } catch(e) { console.warn('DB.saveCreditAccount', e); }
   },
@@ -1963,7 +1966,7 @@ function formatCreditRequest(input) {
   let val = input.value.replace(/[^\d]/g, '');
   if (val) {
     const num = parseInt(val);
-    input.value = '$' + num.toLocaleString();
+    input.value = CURRENCY.DISPLAY + num.toLocaleString();
   }
   validateCreditRequest();
 }
@@ -2076,8 +2079,13 @@ async function adminReviewCredit(applicationId, action, approvedLimit = 0, reaso
 
   if (action === 'approve') {
     const limit = approvedLimit > 0 ? approvedLimit : (targetAccount?.estimatedLimit || 0);
-    // Update Supabase directly (works once admin RLS policy is in place)
-    if (_sb && targetUserId) {
+    const apiResult = await apiFetch('/api/admin/credit/' + targetUserId + '/approve', {
+      method: 'POST', body: JSON.stringify({ limit })
+    });
+    if (apiResult) {
+      showToast('✓ Credit approved — ' + fmtMoney(limit) + ' (email sent)', 'success');
+    } else if (_sb && targetUserId) {
+      // Fallback: API not configured/reachable — direct Supabase write (needs admin RLS policy)
       try {
         const { error } = await _sb.from('credit_accounts').update({
           status: 'ACTIVE',
@@ -2105,9 +2113,14 @@ async function adminReviewCredit(applicationId, action, approvedLimit = 0, reaso
         Storage.set('creditAccount', creditAccount);
       }
     }
-    notifyUserCreditApproved(targetAccount || { companyProfile: {}, limit });
+    if (!apiResult) notifyUserCreditApproved(targetAccount || { companyProfile: {}, limit }); // API already emailed if it succeeded
   } else if (action === 'reject') {
-    if (_sb && targetUserId) {
+    const apiResult = await apiFetch('/api/admin/credit/' + targetUserId + '/reject', {
+      method: 'POST', body: JSON.stringify({ reason })
+    });
+    if (apiResult) {
+      showToast('Application rejected (email sent)', 'war');
+    } else if (_sb && targetUserId) {
       try {
         const { error } = await _sb.from('credit_accounts').update({
           status: 'REJECTED',
@@ -2132,7 +2145,7 @@ async function adminReviewCredit(applicationId, action, approvedLimit = 0, reaso
         Storage.set('creditAccount', creditAccount);
       }
     }
-    notifyUserCreditRejected(targetAccount || {});
+    if (!apiResult) notifyUserCreditRejected(targetAccount || {}); // API already emailed if it succeeded
   }
   renderAll();
   adminLoadCreditApplications(); // Refresh the list
@@ -2230,8 +2243,13 @@ function markAllNotifRead() {
   updateNotifBadge();
 }
 
-// ─── EMAIL NOTIFICATIONS (via Edge Function or fallback) ───
+// ─── EMAIL NOTIFICATIONS (via Express API if configured, else Edge Function fallback) ───
 async function notifyAdminNewApplication(ca) {
+  const apiResult = await apiFetch('/api/notify/credit-application', {
+    method: 'POST',
+    body: JSON.stringify({ company: ca.companyProfile.company, limit: ca.estimatedLimit })
+  });
+  if (apiResult) return;
   if (!_sb) return;
   try {
     await _sb.functions.invoke('notify-admin', {
@@ -2412,9 +2430,9 @@ async function placeBid() {
   const amt = parseFloat(raw) || 0;       // keep in dollar space (matches hardcoded data)
   const t = TERRITORIES[current];
 
-  const minBid = t.bid + CONFIG.MIN_BID_INCREMENT; // $1,000 minimum increment (cents)
+  const minBid = t.bid + 1000; // $1,000 minimum increment in dollar space
   if (!amt || amt < minBid) {
-    showToast('Bid must be at least ' + fmtMoney(minBid), 'err'); return;
+    showToast('Bid must be at least $' + minBid.toLocaleString(), 'err'); return;
   }
 
   const tollBuffer = Math.floor(amt * CONFIG.PLATFORM_TOLL_RATE);
@@ -2429,7 +2447,7 @@ async function placeBid() {
   // session cannot bid beyond its real available credit. Run territoryx_security.sql
   // in the Supabase SQL editor once to install this function. ──
   if (_sb && !demoMode) {
-    const { data, error } = await _sb.rpc('place_bid', { p_territory_id: current, p_amount: Math.round(amt) });
+    const { data, error } = await _sb.rpc('place_bid', { p_territory_id: current, p_amount: amt });
     if (error || !data || data.success === false) {
       showToast((data && data.error) || (error && error.message) || 'Bid rejected by server', 'err');
       return;
@@ -2728,10 +2746,12 @@ function checkCollections() {
   return changed;
 }
 
-function markInvoicePaid(invoiceId) {
+async function markInvoicePaid(invoiceId) {
   if (!isAdmin()) { showToast('Only an admin can confirm payment received', 'err'); return; }
   const inv = invoices.find(i => i._id === invoiceId);
   if (!inv) return;
+
+  const apiResult = await apiFetch('/api/admin/invoices/' + invoiceId + '/mark-paid', { method: 'POST' });
 
   inv.status = 'PAID';
   inv.paidAt = Date.now();
@@ -2751,13 +2771,12 @@ function markInvoicePaid(invoiceId) {
     Storage.set('revenue', revenue);
   }
   Storage.set('invoices', invoices);
-  DB.saveInvoice(inv); // SECURITY FIX: previously this only updated localStorage, so the PAID
-                        // status never reached Supabase and other devices/admins never saw it.
+  if (!apiResult) DB.saveInvoice(inv); // API already persisted it server-side if it succeeded
 
   if (creditAccount && creditAccount.status === 'SUSPENDED') {
     creditAccount.status = 'ACTIVE';
     Storage.set('creditAccount', creditAccount);
-    DB.saveCreditAccount(creditAccount);
+    if (!apiResult) DB.saveCreditAccount(creditAccount);
   }
 
   showToast('✓ Invoice ' + inv.invoiceNumber + ' marked PAID', 'success');
@@ -3137,6 +3156,31 @@ function showInvoiceDetail(invId) {
 function downloadInvoicePDF(invId) {
   const inv = invoices.find(i => i._id === invId);
   if (!inv) return;
+  downloadInvoicePDFImpl(invId, inv);
+}
+
+async function downloadInvoicePDFImpl(invId, inv) {
+  // Prefer the server-generated PDF (authoritative DB data) if the API is configured
+  if (CONFIG.API_BASE) {
+    try {
+      const { data: sessionData } = await _sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) {
+        const res = await fetch(CONFIG.API_BASE + '/api/invoices/' + invId + '/pdf', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = inv.invoiceNumber + '.pdf'; a.click();
+          URL.revokeObjectURL(url);
+          showToast('Invoice PDF downloaded', 'success');
+          return;
+        }
+      }
+    } catch (e) { console.warn('Server PDF failed, falling back to client-generated PDF:', e.message); }
+  }
 
   if (typeof window.jspdf === 'undefined') {
     showToast('PDF library failed to load — check your connection', 'err');
@@ -3173,16 +3217,16 @@ function downloadInvoicePDF(invId) {
   inv.lineItems.forEach(li => {
     doc.text(li.description, left, y);
     doc.text(String(li.quantity), left + 320, y);
-    doc.text(fmtMoney(li.amount), left + 400, y);
+    doc.text(CURRENCY.DISPLAY + li.amount.toLocaleString(), left + 400, y);
     y += 18;
   });
   y += 4; doc.line(left, y, left + 480, y); y += 18;
 
   doc.setFont('helvetica', 'bold');
-  doc.text('TOTAL', left + 320, y); doc.text(fmtMoney(inv.total), left + 400, y); y += 16;
+  doc.text('TOTAL', left + 320, y); doc.text(CURRENCY.DISPLAY + inv.total.toLocaleString(), left + 400, y); y += 16;
   if (inv.balanceDue > 0) {
     doc.setTextColor(200, 30, 30);
-    doc.text('BALANCE DUE', left + 320, y); doc.text(fmtMoney(inv.balanceDue), left + 400, y);
+    doc.text('BALANCE DUE', left + 320, y); doc.text(CURRENCY.DISPLAY + inv.balanceDue.toLocaleString(), left + 400, y);
     doc.setTextColor(0, 0, 0); y += 16;
   }
   y += 24;
@@ -3242,14 +3286,24 @@ function logoClick() {
   showAdminPanel();
 }
 
-async function invokeAdminEdge(functionName, payload) {
-  if (!isAdmin()) { showToast('Admin only', 'err'); return null; }
+// Calls the territoryx-api Express backend with the user's Supabase JWT attached,
+// so the API's verifyJWT/requireAdmin middleware can authenticate the request.
+// Returns null (and toasts) on failure; caller decides whether to fall back.
+async function apiFetch(path, opts = {}) {
+  if (!CONFIG.API_BASE) return null;
   try {
-    const { data, error } = await _sb.functions.invoke(functionName, { body: payload });
-    if (error) throw error;
-    return data;
+    const { data: sessionData } = await _sb.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) { showToast('Not signed in', 'err'); return null; }
+    const res = await fetch(CONFIG.API_BASE + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) }
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(body.error || ('API error ' + res.status), 'err'); return null; }
+    return body;
   } catch (e) {
-    showToast('Admin operation failed: ' + e.message, 'err');
+    console.warn('apiFetch failed, will fall back if available:', e.message);
     return null;
   }
 }
@@ -3413,8 +3467,25 @@ async function adminLoadCreditApplications() {
 
   const apps = [];
 
-  // Try Supabase — show ALL non-rejected statuses (needs admin RLS policy to see other users)
-  if (_sb) {
+  // Prefer the secured Express API — uses the service-role key, so it always sees
+  // every application regardless of RLS policy state.
+  let apiRows = null;
+  const apiResult = await apiFetch('/api/admin/credit/applications');
+  if (apiResult) apiRows = apiResult;
+
+  if (apiRows) {
+    apiRows.forEach(row => {
+      apps.push({
+        applicationId: row.user_id,
+        status: row.status,
+        estimatedLimit: row.credit_limit || 0,
+        requestedAmount: row.company_profile?.requestedAmount || row.credit_limit || 0,
+        companyProfile: row.company_profile || {},
+        createdAt: row.created_at
+      });
+    });
+  } else if (_sb) {
+    // Fallback: direct Supabase — show ALL non-rejected statuses (needs admin RLS policy to see other users)
     try {
       const { data, error } = await _sb.from('credit_accounts').select('*').neq('status', 'REJECTED');
       if (!error && data && data.length) {
