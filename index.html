@@ -1749,6 +1749,9 @@ const DB = {
         t.challengers = row.challengers ?? t.challengers;
         t.imgL = row.billboard_url ?? t.imgL;
         t.imgP = row.billboard_mobile_url ?? t.imgP;
+        t.pendingBrand = row.pending_brand ?? t.pendingBrand;
+        t.pendingColor = row.pending_color ?? t.pendingColor;
+        t.pendingTagline = row.pending_tagline ?? t.pendingTagline;
       });
     } catch(e) { console.warn('DB.loadTerritories', e); }
   },
@@ -1760,7 +1763,8 @@ const DB = {
         id, bid: t.bid, brand: t.brand, color: t.color, tagline: t.tagline,
         threat: t.threat, own_days: t.ownDays, sudden: t.sudden,
         history: t.history, challengers: t.challengers,
-        billboard_url: t.imgL, billboard_mobile_url: t.imgP
+        billboard_url: t.imgL, billboard_mobile_url: t.imgP,
+        pending_brand: t.pendingBrand || null, pending_color: t.pendingColor || null, pending_tagline: t.pendingTagline || null
       }, { onConflict: 'id' });
     } catch(e) { console.warn('DB.saveTerritory', e); }
     saveLocalTerritories();
@@ -1847,10 +1851,13 @@ const DB = {
           const row = payload.new;
           if (!TERRITORIES[row.id]) return;
           const t = TERRITORIES[row.id];
-          if (row.bid > t.bid) {
+          // Sync on bid increases (live bidding) OR brand changes (epoch settlement —
+          // bid decays DOWN at settlement, so this can't gate on bid alone anymore).
+          if (row.bid > t.bid || row.brand !== t.brand) {
             t.bid = row.bid; t.brand = row.brand; t.color = row.color;
             t.tagline = row.tagline; t.threat = row.threat; t.ownDays = row.own_days;
             t.sudden = row.sudden; t.history = row.history; t.challengers = row.challengers;
+            t.pendingBrand = row.pending_brand; t.pendingColor = row.pending_color; t.pendingTagline = row.pending_tagline;
             onUpdate(row.id);
           }
         }).subscribe();
@@ -1917,10 +1924,11 @@ setInterval(() => {
     const changed = checkCollections();
     if (changed) renderAll();
   }
-  // Auto-settle when epoch expires
-  if (epochData.endsAt < now && epochData.status === 'ACTIVE') {
-    autoSettleEpoch();
-  }
+  // Auto-settle disabled for testing — admin closes the epoch manually via the admin panel.
+  // (Re-enable by uncommenting below once you're ready for unattended weekly cycles.)
+  // if (epochData.endsAt < now && epochData.status === 'ACTIVE') {
+  //   autoSettleEpoch();
+  // }
 }, 1000);
 
 // ─── CREDIT SYSTEM ───
@@ -2487,19 +2495,19 @@ async function placeBid() {
   Storage.set('myBids', myBids);
   if (!(_sb && !demoMode)) DB.saveBid(bidRecord);  // real mode already inserted the bid inside place_bid()
 
-  // Update territory
+  // Update territory — bid AMOUNT updates live (so others know what to beat), but who
+  // DISPLAYS as the billboard owner is locked until admin closes the epoch. The current
+  // leader is tracked separately in pendingBrand/pendingColor/pendingTagline.
   t.bid = amt;
-  t.brand = creditAccount.companyProfile.company;
-  t.color = '#00F2FE';
-  t.tagline = 'New market leader';
+  t.pendingBrand = creditAccount.companyProfile.company;
+  t.pendingColor = '#00F2FE';
+  t.pendingTagline = 'New market leader';
   t.history.unshift({
     co: creditAccount.companyProfile.company,
     c: '#00F2FE',
     amt: fmtMoney(amt),
     t: 'just now'
   });
-  t.threat = Math.max(1, t.threat - 2);
-  t.ownDays = 1;
   DB.saveTerritory(current);  // broadcast bid to all users
   saveLocalTerritories();
 
@@ -2512,9 +2520,8 @@ async function placeBid() {
     showToast('⚡ SUDDEN DEATH — Epoch extended 15 min', 'war');
   }
 
-  triggerTakeover('#00F2FE');
   setTimeout(() => renderAll(), 200);
-  showToast('✓ BID PLACED — ' + fmtMoney(amt) + ' on ' + t.city, 'success');
+  showToast('✓ BID PLACED — ' + fmtMoney(amt) + ' on ' + t.city + ' (live until admin closes epoch)', 'success');
   document.getElementById('bidInput').value = '';
 
   // Update epoch volume
@@ -2597,7 +2604,7 @@ function autoSettleEpoch() {
   let count = 0;
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
-    if (t.brand === (creditAccount?.companyProfile?.company || 'Your Company')) {
+    if (t.pendingBrand && t.pendingBrand === (creditAccount?.companyProfile?.company || 'Your Company')) {
       const existing = invoices.find(i => i.territoryId === id && i.epochId === epochData.number);
       if (!existing) {
         generateInvoice(id, t.bid);
@@ -2618,13 +2625,21 @@ function autoSettleEpoch() {
 
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
+    if (t.pendingBrand) {
+      t.brand = t.pendingBrand;
+      t.color = t.pendingColor;
+      t.tagline = t.pendingTagline;
+      t.ownDays = 1;
+      t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
+    } else if (t.ownDays > 0) {
+      t.ownDays += 1;
+    }
+    t.pendingBrand = null;
+    t.pendingColor = null;
+    t.pendingTagline = null;
     t.bid = Math.floor(t.bid * 0.1);
     if (t.bid < 8000) t.bid = 8000;
     t.sudden = false;
-    t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
-    t.ownDays = 0;
-    t.brand = 'UNCLAIMED';
-    t.color = '#666';
     DB.saveTerritory(id);
   });
   saveLocalTerritories();
@@ -2648,7 +2663,7 @@ function settleEpoch() {
   let count = 0;
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
-    if (t.brand === (creditAccount?.companyProfile?.company || 'Your Company')) {
+    if (t.pendingBrand && t.pendingBrand === (creditAccount?.companyProfile?.company || 'Your Company')) {
       const existing = invoices.find(i => i.territoryId === id && i.epochId === epochData.number);
       if (!existing) {
         generateInvoice(id, t.bid);
@@ -2670,13 +2685,23 @@ function settleEpoch() {
 
   ORDER.forEach(id => {
     const t = TERRITORIES[id];
+    // Promote this epoch's winning bid to the locked display. If nobody bid this
+    // epoch, the previous owner keeps their billboard uncontested into the new period.
+    if (t.pendingBrand) {
+      t.brand = t.pendingBrand;
+      t.color = t.pendingColor;
+      t.tagline = t.pendingTagline;
+      t.ownDays = 1;
+      t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
+    } else if (t.ownDays > 0) {
+      t.ownDays += 1; // same owner, uncontested another period
+    }
+    t.pendingBrand = null;
+    t.pendingColor = null;
+    t.pendingTagline = null;
     t.bid = Math.floor(t.bid * 0.1);
     if (t.bid < 8000) t.bid = 8000;
     t.sudden = false;
-    t.threat = Math.max(1, Math.floor(Math.random() * 3) + 1);
-    t.ownDays = 0;
-    t.brand = 'UNCLAIMED';
-    t.color = '#666';
     DB.saveTerritory(id);
   });
   saveLocalTerritories();
@@ -3308,7 +3333,26 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
-function adminSettleEpoch() { settleEpoch(); closeModal('adminModal'); }
+async function adminSettleEpoch() {
+  // Prefer the secured API — it sees ALL users' bids and generates invoices for everyone,
+  // not just the current browser session. Falls back to local JS if API_BASE not set.
+  if (CONFIG.API_BASE) {
+    const result = await apiFetch('/api/admin/epoch/settle', { method: 'POST' });
+    if (result) {
+      showToast(`✓ EPOCH SETTLED (server) — ${result.invoicesGenerated} invoices generated`, 'success');
+      // Reload territories + epoch from DB so local display reflects what the server just wrote
+      await DB.loadTerritories();
+      epochData = (await DB.loadEpoch()) || epochData;
+      Storage.set('epoch', epochData);
+      renderAll();
+      closeModal('adminModal');
+      return;
+    }
+  }
+  // Fallback: local JS settlement (only invoices this session's user, for testing without API)
+  settleEpoch();
+  closeModal('adminModal');
+}
 function adminResetEpoch() {
   epochData.number = 1;
   epochData.name = 'EPOCH 01';
@@ -4496,7 +4540,8 @@ function saveLocalTerritories() {
       bid: t.bid, brand: t.brand, color: t.color, tagline: t.tagline,
       threat: t.threat, ownDays: t.ownDays, sudden: t.sudden,
       history: t.history.slice(0, 20), challengers: t.challengers.slice(0, 10),
-      imgL: t.imgL, imgP: t.imgP
+      imgL: t.imgL, imgP: t.imgP,
+      pendingBrand: t.pendingBrand, pendingColor: t.pendingColor, pendingTagline: t.pendingTagline
     };
   });
   Storage.set('territories', data);
@@ -4520,6 +4565,9 @@ function loadLocalTerritories() {
       if (l.challengers) t.challengers = l.challengers;
       if (l.imgL) t.imgL = l.imgL;
       if (l.imgP) t.imgP = l.imgP;
+      if (l.pendingBrand !== undefined) t.pendingBrand = l.pendingBrand;
+      if (l.pendingColor !== undefined) t.pendingColor = l.pendingColor;
+      if (l.pendingTagline !== undefined) t.pendingTagline = l.pendingTagline;
     }
   });
 }
