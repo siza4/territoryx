@@ -1851,17 +1851,13 @@ const DB = {
           const row = payload.new;
           if (!TERRITORIES[row.id]) return;
           const t = TERRITORIES[row.id];
-          const brandChanged = row.brand !== t.brand;
           // Sync on bid increases (live bidding) OR brand changes (epoch settlement —
           // bid decays DOWN at settlement, so this can't gate on bid alone anymore).
-          if (row.bid > t.bid || brandChanged) {
+          if (row.bid > t.bid || row.brand !== t.brand) {
             t.bid = row.bid; t.brand = row.brand; t.color = row.color;
             t.tagline = row.tagline; t.threat = row.threat; t.ownDays = row.own_days;
             t.sudden = row.sudden; t.history = row.history; t.challengers = row.challengers;
             t.pendingBrand = row.pending_brand; t.pendingColor = row.pending_color; t.pendingTagline = row.pending_tagline;
-            if (brandChanged && row.id === current) {
-              triggerTakeover(row.color || t.color, row.billboard_url || t.imgL);
-            }
             onUpdate(row.id);
           }
         }).subscribe();
@@ -1983,11 +1979,6 @@ function formatCreditRequest(input) {
   validateCreditRequest();
 }
 
-function formatBidInput(input) {
-  let v = input.value.replace(/[^\d]/g, '');
-  if (v) input.value = '$' + parseInt(v).toLocaleString();
-}
-
 function validateCreditRequest() {
   const reqEl = document.getElementById('caRequestedAmount');
   const hint = document.getElementById('creditRequestHint');
@@ -2026,13 +2017,12 @@ function submitCreditApplication() {
   const website = document.getElementById('caWebsite').value.trim();
   const email = document.getElementById('caEmail').value.trim();
   const reqRaw = document.getElementById('caRequestedAmount').value.replace(/[^\d]/g, '');
-  const requestedAmountDollars = reqRaw ? parseInt(reqRaw) : 0;
-  const requestedAmount = toCents(requestedAmountDollars);  // ← cents
+  const requestedAmount = reqRaw ? parseInt(reqRaw) : 0;
 
   if (!company || !reg || !country || !revenue || !years || !employees) {
     showToast('Complete all required fields', 'err'); return;
   }
-  if (!requestedAmountDollars || requestedAmountDollars <= 0) {
+  if (!requestedAmount || requestedAmount <= 0) {
     showToast('Enter a requested credit amount', 'err'); return;
   }
 
@@ -2444,12 +2434,11 @@ async function placeBid() {
     return;
   }
 
-  const raw = document.getElementById('bidInput').value.replace(/[^\d]/g, '');
-  const amtDollars = parseFloat(raw) || 0;   // what the user typed
-  const amt = toCents(amtDollars);             // ← convert to cents for all internal math
+  const raw = document.getElementById('bidInput').value.replace(/[$,\s]/g, '');
+  const amt = parseFloat(raw) || 0;       // keep in dollar space (matches hardcoded data)
   const t = TERRITORIES[current];
 
-  const minBid = t.bid + CONFIG.MIN_BID_INCREMENT; // both now in cents
+  const minBid = t.bid + 1000; // $1,000 minimum increment in dollar space
   if (!amt || amt < minBid) {
     showToast('Bid must be at least $' + minBid.toLocaleString(), 'err'); return;
   }
@@ -2477,10 +2466,6 @@ async function placeBid() {
     if (fresh) { creditAccount = fresh; Storage.set('creditAccount', creditAccount); }
     const prevBid = myBids.find(b => b.status === 'ACCEPTED' && b.territoryId === current);
     if (prevBid) prevBid.status = 'OUTBID';
-    // Set pending winner locally so the panel shows the challenger immediately
-    t.pendingBrand = creditAccount?.companyProfile?.company || 'You';
-    t.pendingColor = '#00F2FE';
-    t.pendingTagline = 'New market leader';
   } else {
     // ── DEMO / OFFLINE MODE: original local-only math (no real money/credit at stake) ──
     const prevBid = myBids.find(b => b.status === 'ACCEPTED' && b.territoryId === current);
@@ -3290,6 +3275,11 @@ function showAdminPanel() {
     return;
   }
 
+  // Load all dynamic admin sections that otherwise show "Loading..." forever
+  adminLoadCreditApplications();
+  adminLoadUsers();
+  adminPopulateTerritorySelect();
+
   const list = document.getElementById('adminInvList');
   if (list) {
     list.innerHTML = invoices.map(inv => {
@@ -3564,13 +3554,23 @@ async function adminLoadCreditApplications() {
     }
   }
 
-  // Fallback: check localStorage for this device
+  // Fallback: check localStorage for this device (same browser)
   if (!apps.length) {
     Object.keys(localStorage).forEach(k => {
       if (k.startsWith('tx_creditAccount')) {
         try {
           const ca = JSON.parse(localStorage.getItem(k));
-          if (ca && ca.status && ca.status !== 'REJECTED') apps.push(ca);
+          if (ca && ca.status && ca.status !== 'REJECTED') {
+            // Normalize to the same shape the API/Supabase returns
+            apps.push({
+              applicationId: ca.applicationId || ca.user_id || 'local_' + Date.now(),
+              status: ca.status,
+              estimatedLimit: ca.estimatedLimit || ca.limit || 0,
+              requestedAmount: ca.companyProfile?.requestedAmount || ca.estimatedLimit || 0,
+              companyProfile: ca.companyProfile || {},
+              createdAt: ca.createdAt || ca.created_at || Date.now()
+            });
+          }
         } catch(e) {}
       }
     });
@@ -4408,14 +4408,26 @@ async function signOut() {
   if (!_sb) { showToast('Not signed in', 'info'); return; }
   await _sb.auth.signOut();
   currentUser = null;
-  // Clear all user-specific state so next user doesn't see old data
+
+  // Wipe user-specific state from memory AND localStorage so the next
+  // visitor / account doesn't see the previous user's credit, bids, or invoices.
   creditAccount = null;
   myBids = [];
   invoices = [];
   notifications = [];
-  // Don't clear localStorage — just clear memory. The next user will load their own data from Supabase.
+  Storage.set('creditAccount', null);
+  Storage.set('myBids', []);
+  Storage.set('invoices', []);
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith('tx_notifications_')) localStorage.removeItem(k);
+  });
+
+  // Force UI to drop the old credit pill / bids immediately before reload
+  updateAuthUI();
+  renderAll();
+
   showToast('Signed out', 'info');
-  setTimeout(() => location.reload(), 400);
+  setTimeout(() => location.reload(), 600);
 }
 
 // ─── PASSWORD RECOVERY & MAGIC LINK HANDLER ───
