@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>TerritoryX Admin Panel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#070B14;--panel:#0C1221;--panel2:#111827;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --gold:#FFB800;--cyan:#00E5FF;--green:#00FF95;--red:#FF3D57;
+  --muted:#6B7A99;--text:#E2E8F0;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;overflow:hidden}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-thumb{background:#2A3245;border-radius:2px}
+
+/* ── AUTH SCREEN ── */
+#auth-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999}
+.auth-box{background:var(--panel);border:1px solid var(--border2);border-radius:12px;padding:32px;width:340px;text-align:center}
+.auth-logo{font-size:22px;font-weight:900;color:white;margin-bottom:4px}
+.auth-logo span{color:var(--gold)}
+.auth-sub{font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace;margin-bottom:24px;text-transform:uppercase;letter-spacing:0.08em}
+.auth-field{background:rgba(0,0,0,0.4);border:1px solid var(--border2);border-radius:6px;padding:10px 12px;width:100%;color:white;font-size:13px;outline:none;margin-bottom:8px;font-family:'Inter',sans-serif}
+.auth-field:focus{border-color:var(--gold)}
+.auth-btn{width:100%;background:var(--gold);color:black;border:none;border-radius:6px;padding:11px;font-size:12px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;margin-top:4px}
+.auth-btn:hover{background:#FFC83D}
+.auth-err{font-size:11px;color:var(--red);margin-top:8px;display:none}
+
+/* ── LAYOUT ── */
+#app{display:grid;grid-template-columns:220px 1fr;grid-template-rows:52px 1fr;height:100vh;display:none}
+
+/* ── TOPBAR ── */
+#topbar{grid-column:1/-1;background:#0A0E1A;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:14px}
+.tb-logo{font-size:16px;font-weight:900;color:white}
+.tb-logo span{color:var(--gold)}
+.tb-badge{background:var(--gold);color:black;font-size:9px;font-weight:700;font-family:'IBM Plex Mono',monospace;padding:2px 6px;border-radius:3px;letter-spacing:0.08em}
+.tb-sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+.tb-status{font-size:10px;font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:5px}
+.tb-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.tb-url{font-size:10px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+.tb-logout{background:rgba(255,255,255,0.05);border:1px solid var(--border2);border-radius:5px;padding:5px 10px;color:var(--muted);font-size:10px;font-family:'IBM Plex Mono',monospace;cursor:pointer}
+.tb-logout:hover{color:var(--red);border-color:rgba(255,61,87,0.3)}
+
+/* ── SIDEBAR ── */
+#sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.nav-section{padding:14px 12px 6px;font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;transition:all 0.12s;border-radius:0;font-size:12px;font-weight:500;color:var(--muted);border-left:2px solid transparent;margin:1px 0}
+.nav-item:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.nav-item.active{background:rgba(255,184,0,0.08);color:var(--gold);border-left-color:var(--gold)}
+.nav-item .icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
+.nav-badge{margin-left:auto;background:var(--red);color:white;font-size:8px;font-weight:700;padding:1px 5px;border-radius:10px;font-family:'IBM Plex Mono',monospace}
+.sb-bottom{margin-top:auto;padding:12px;border-top:1px solid var(--border)}
+.sb-version{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);text-align:center}
+
+/* ── MAIN CONTENT ── */
+#content{overflow-y:auto;background:var(--bg);padding:24px}
+.page{display:none}
+.page.active{display:block}
+
+/* ── PAGE HEADERS ── */
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.page-title{font-size:18px;font-weight:800;color:white;display:flex;align-items:center;gap:8px}
+.page-title .icon{font-size:20px}
+.page-sub{font-size:11px;color:var(--muted);margin-top:2px;font-family:'IBM Plex Mono',monospace}
+
+/* ── STAT CARDS ── */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.stat-label{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:5px}
+.stat-value{font-size:24px;font-weight:800;color:white;font-family:'IBM Plex Mono',monospace;line-height:1}
+.stat-value.gold{color:var(--gold)}
+.stat-value.cyan{color:var(--cyan)}
+.stat-value.green{color:var(--green)}
+.stat-value.red{color:var(--red)}
+.stat-sub{font-size:10px;color:var(--muted);margin-top:3px}
+
+/* ── TABLES ── */
+.table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:20px}
+.table-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.table-title{font-size:12px;font-weight:700;color:white;text-transform:uppercase;letter-spacing:0.06em;font-family:'IBM Plex Mono',monospace}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 14px;font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;background:rgba(0,0,0,0.2);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.td-mono{font-family:'IBM Plex Mono',monospace}
+.td-gold{color:var(--gold);font-weight:700;font-family:'IBM Plex Mono',monospace}
+.td-muted{color:var(--muted)}
+.td-trunc{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── STATUS BADGES ── */
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap}
+.badge-green{background:rgba(0,255,149,0.12);color:#00FF95;border:1px solid rgba(0,255,149,0.25)}
+.badge-gold{background:rgba(255,184,0,0.12);color:var(--gold);border:1px solid rgba(255,184,0,0.25)}
+.badge-red{background:rgba(255,61,87,0.12);color:var(--red);border:1px solid rgba(255,61,87,0.25)}
+.badge-cyan{background:rgba(0,229,255,0.10);color:var(--cyan);border:1px solid rgba(0,229,255,0.22)}
+.badge-muted{background:rgba(107,122,153,0.12);color:var(--muted);border:1px solid rgba(107,122,153,0.22)}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:5px;font-size:11px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;border:none;transition:all 0.12s}
+.btn-gold{background:var(--gold);color:black}
+.btn-gold:hover{background:#FFC83D}
+.btn-red{background:rgba(255,61,87,0.15);color:var(--red);border:1px solid rgba(255,61,87,0.3)}
+.btn-red:hover{background:rgba(255,61,87,0.25)}
+.btn-green{background:rgba(0,255,149,0.12);color:var(--green);border:1px solid rgba(0,255,149,0.3)}
+.btn-green:hover{background:rgba(0,255,149,0.2)}
+.btn-ghost{background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border2)}
+.btn-ghost:hover{background:rgba(255,255,255,0.09)}
+.btn-sm{padding:4px 9px;font-size:9px}
+.btn-icon{font-size:13px}
+
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);z-index:200;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal-box{background:var(--panel);border:1px solid var(--border2);border-radius:10px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-box.sm{max-width:420px}
+.modal-box.md{max-width:580px}
+.modal-box.lg{max-width:720px}
+.modal-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.modal-head-title{font-size:13px;font-weight:700;color:white;text-transform:uppercase;letter-spacing:0.06em;font-family:'IBM Plex Mono',monospace}
+.modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px}
+.modal-close:hover{color:white}
+.modal-body{padding:18px;overflow-y:auto;flex:1}
+.modal-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0}
+
+/* ── FORMS ── */
+.form-grid{display:grid;gap:12px}
+.form-grid.cols2{grid-template-columns:1fr 1fr}
+.form-grid.cols3{grid-template-columns:1fr 1fr 1fr}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group.full{grid-column:1/-1}
+.field-label{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em}
+.field-hint{font-size:9px;color:var(--muted2,#444);margin-top:2px;font-family:'IBM Plex Mono',monospace}
+.field-input,.field-select,.field-textarea{background:rgba(0,0,0,0.4);border:1px solid var(--border2);border-radius:5px;padding:8px 10px;color:white;font-size:12px;font-family:'Inter',sans-serif;outline:none;width:100%;transition:border-color 0.15s}
+.field-input:focus,.field-select:focus,.field-textarea:focus{border-color:var(--gold)}
+.field-textarea{resize:vertical;min-height:70px}
+.field-select option{background:#1A1A2E}
+.field-checkbox{display:flex;align-items:center;gap:8px;cursor:pointer}
+.field-checkbox input{width:15px;height:15px;accent-color:var(--gold)}
+
+/* ── CONFIG GROUPS ── */
+.config-section{margin-bottom:24px}
+.config-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);font-family:'IBM Plex Mono',monospace;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:14px;display:flex;align-items:center;gap:6px}
+
+/* ── SEARCH / FILTERS ── */
+.table-controls{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.search-input{background:rgba(0,0,0,0.4);border:1px solid var(--border2);border-radius:5px;padding:7px 10px 7px 28px;color:white;font-size:12px;outline:none;min-width:220px;position:relative}
+.search-wrap{position:relative}
+.search-wrap::before{content:'⌕';position:absolute;left:9px;top:7px;color:var(--muted);font-size:13px;z-index:1}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:20px;right:20px;z-index:999;display:flex;flex-direction:column;gap:6px}
+.toast-item{background:var(--panel);border:1px solid var(--border2);border-radius:6px;padding:10px 14px;font-size:11px;font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:8px;animation:toastIn 0.2s ease;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
+.toast-item.success{border-color:rgba(0,255,149,0.4);color:var(--green)}
+.toast-item.error{border-color:rgba(255,61,87,0.4);color:var(--red)}
+.toast-item.info{border-color:rgba(0,229,255,0.3);color:var(--cyan)}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+
+/* ── TICKER EDITOR ── */
+.ticker-row{display:flex;align-items:center;gap:8px;padding:8px;border-radius:5px;background:rgba(0,0,0,0.3);border:1px solid var(--border);margin-bottom:5px}
+.color-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* ── EMPTY STATE ── */
+.empty-state{text-align:center;padding:40px 20px;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px}
+.empty-icon{font-size:32px;margin-bottom:10px}
+
+/* Recent bids panel */
+.bid-row-status{display:inline-flex;align-items:center;gap:5px}
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-logo">TERRITORY<span>X</span></div>
+    <div class="auth-sub">Admin Control Panel</div>
+    <input class="auth-field" id="auth-url" type="url" placeholder="Supabase Project URL" autocomplete="off">
+    <input class="auth-field" id="auth-anon" type="text" placeholder="Supabase Anon Key" autocomplete="off">
+    <input class="auth-field" id="auth-service" type="password" placeholder="Service Role Key (admin access)" autocomplete="off">
+    <input class="auth-field" id="auth-pw" type="password" placeholder="Admin Panel Password" autocomplete="off">
+    <button class="auth-btn" onclick="doLogin()">CONNECT & LOGIN</button>
+    <div class="auth-err" id="auth-err"></div>
+    <div style="font-size:9px;color:var(--muted);margin-top:12px;font-family:'IBM Plex Mono',monospace;line-height:1.6;">Keys stored in sessionStorage only.<br>Never sent anywhere except your Supabase instance.</div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="tb-logo">TERRITORY<span>X</span></div>
+    <div class="tb-badge">ADMIN</div>
+    <div class="tb-sep"></div>
+    <div class="tb-status"><div class="tb-dot"></div><span id="tb-conn" style="color:var(--green);font-size:10px;">CONNECTED</span></div>
+    <div class="tb-right">
+      <span class="tb-url" id="tb-url"></span>
+      <button class="tb-logout" onclick="doLogout()">LOGOUT</button>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="nav-section">Platform</div>
+    <div class="nav-item active" onclick="showPage('dashboard')"><span class="icon">📊</span> Dashboard</div>
+    <div class="nav-item" onclick="showPage('nodes')"><span class="icon">📍</span> Nodes <span id="nav-node-count" class="nav-badge" style="background:var(--cyan);color:black;display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('bids')"><span class="icon">⚔️</span> Bids <span id="nav-bid-badge" class="nav-badge" style="display:none">0</span></div>
+    <div class="nav-section">Configure</div>
+    <div class="nav-item" onclick="showPage('config')"><span class="icon">⚙️</span> Platform Config</div>
+    <div class="nav-item" onclick="showPage('categories')"><span class="icon">🏷️</span> Categories</div>
+    <div class="nav-item" onclick="showPage('challengers')"><span class="icon">🥊</span> Challengers</div>
+    <div class="nav-item" onclick="showPage('ticker')"><span class="icon">📡</span> Ticker Messages</div>
+    <div class="nav-item" onclick="showPage('tiers')"><span class="icon">🏆</span> Prestige Tiers</div>
+    <div class="sb-bottom"><div class="sb-version">TerritoryX Admin v1.0</div></div>
+  </div>
+
+  <!-- CONTENT -->
+  <div id="content">
+
+    <!-- ═══ DASHBOARD ═══ -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">📊</span> Dashboard</div><div class="page-sub">Platform overview — live data</div></div>
+        <button class="btn btn-ghost" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total Nodes</div><div class="stat-value cyan" id="s-nodes">—</div><div class="stat-sub">Active billboard slots</div></div>
+        <div class="stat-card"><div class="stat-label">Claimed / Available</div><div class="stat-value gold" id="s-claimed">—</div><div class="stat-sub" id="s-avail">— open</div></div>
+        <div class="stat-card"><div class="stat-label">Monthly Value</div><div class="stat-value green" id="s-value">—</div><div class="stat-sub">Total locked value</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Bids</div><div class="stat-value red" id="s-bids">—</div><div class="stat-sub" id="s-bids-sub">Awaiting action</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="table-wrap">
+          <div class="table-header"><span class="table-title">Recent Bids</span><button class="btn btn-ghost btn-sm" onclick="showPage('bids')">View All</button></div>
+          <table><thead><tr><th>Brand</th><th>Node</th><th>Amount</th><th>Status</th></tr></thead><tbody id="dash-bids"></tbody></table>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><span class="table-title">Top Nodes by Value</span></div>
+          <table><thead><tr><th>Node</th><th>Owner</th><th>Value</th><th>Heat</th></tr></thead><tbody id="dash-nodes"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NODES ═══ -->
+    <div id="page-nodes" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">📍</span> Billboard Nodes</div><div class="page-sub">Manage all territory nodes</div></div>
+        <button class="btn btn-gold" onclick="openNodeModal()">+ ADD NODE</button>
+      </div>
+      <div class="table-controls">
+        <div class="search-wrap"><input class="search-input" id="node-search" oninput="renderNodesTable()" placeholder="Search nodes..."></div>
+        <select class="field-select" id="node-filter-status" onchange="renderNodesTable()" style="width:140px"><option value="">All Status</option><option>AVAILABLE</option><option>FORTIFIED</option><option>TRENDING</option><option>UNDER ATTACK</option><option>HOT PROPERTY</option></select>
+        <select class="field-select" id="node-filter-cat" onchange="renderNodesTable()" style="width:150px"><option value="">All Categories</option></select>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Node ID</th><th>Name</th><th>Category</th><th>Owner</th><th>Value</th><th>Prestige</th><th>Status</th><th>Heat</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody id="nodes-tbody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ BIDS ═══ -->
+    <div id="page-bids" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">⚔️</span> Bid Management</div><div class="page-sub">Override requests from the frontend</div></div>
+        <div style="display:flex;gap:8px">
+          <select class="field-select" id="bid-filter" onchange="loadBids()" style="width:150px"><option value="">All Status</option><option>PENDING</option><option>APPROVED</option><option>REJECTED</option><option>INVOICED</option></select>
+          <button class="btn btn-ghost" onclick="loadBids()">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Date</th><th>Brand</th><th>Contact</th><th>Node</th><th>Bid</th><th>vs Current</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="bids-tbody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ CONFIG ═══ -->
+    <div id="page-config" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">⚙️</span> Platform Config</div><div class="page-sub">All admin-configurable settings</div></div>
+        <button class="btn btn-gold" onclick="saveConfig()">💾 SAVE ALL</button>
+      </div>
+      <div id="config-form"></div>
+    </div>
+
+    <!-- ═══ CATEGORIES ═══ -->
+    <div id="page-categories" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">🏷️</span> Node Categories</div><div class="page-sub">Filter categories shown on frontend</div></div>
+        <button class="btn btn-gold" onclick="openCatModal()">+ ADD CATEGORY</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Name</th><th>Slug</th><th>Button Label</th><th>Sort</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody id="cats-tbody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ CHALLENGERS ═══ -->
+    <div id="page-challengers" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">🥊</span> Challengers</div><div class="page-sub">Manage contesting brands per node</div></div>
+        <button class="btn btn-gold" onclick="openChalModal()">+ ADD CHALLENGER</button>
+      </div>
+      <div class="table-controls">
+        <select class="field-select" id="chal-filter-node" onchange="loadChallengers()" style="width:260px"><option value="">All Nodes</option></select>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Node</th><th>Brand</th><th>Bid Amount</th><th>Sort</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody id="chals-tbody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ TICKER ═══ -->
+    <div id="page-ticker" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">📡</span> Ticker Messages</div><div class="page-sub">Bottom scrolling feed on the frontend</div></div>
+        <button class="btn btn-gold" onclick="openTickerModal()">+ ADD MESSAGE</button>
+      </div>
+      <div id="ticker-list" class="table-wrap" style="padding:10px 12px"></div>
+    </div>
+
+    <!-- ═══ PRESTIGE TIERS ═══ -->
+    <div id="page-tiers" class="page">
+      <div class="page-header">
+        <div><div class="page-title"><span class="icon">🏆</span> Prestige Tiers</div><div class="page-sub">Visual badge system for nodes</div></div>
+        <button class="btn btn-gold" onclick="openTierModal()">+ ADD TIER</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Name</th><th>Min Value</th><th>Color</th><th>Preview</th><th>Sort</th><th>Actions</th></tr></thead>
+        <tbody id="tiers-tbody"></tbody></table>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /app -->
+
+<div id="toast"></div>
+
+<!-- ═══ NODE MODAL ═══ -->
+<div class="modal-overlay" id="node-modal">
+  <div class="modal-box lg">
+    <div class="modal-head"><span class="modal-head-title" id="node-modal-title">ADD NODE</span><button class="modal-close" onclick="closeModal('node-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid cols2">
+        <div class="form-group"><label class="field-label">Node ID (slug) *</label><input class="field-input" id="nm-id" placeholder="e.g. sandton-fd"><div class="field-hint">Lowercase, hyphens only. Cannot change after creation.</div></div>
+        <div class="form-group"><label class="field-label">Display Name *</label><input class="field-input" id="nm-name" placeholder="SANDTON FINANCIAL DISTRICT"></div>
+        <div class="form-group"><label class="field-label">Sector *</label><input class="field-input" id="nm-sector" placeholder="GAUTENG // SOUTH AFRICA"></div>
+        <div class="form-group"><label class="field-label">Country *</label><input class="field-input" id="nm-country" placeholder="South Africa"></div>
+        <div class="form-group"><label class="field-label">City</label><input class="field-input" id="nm-city" placeholder="Johannesburg"></div>
+        <div class="form-group"><label class="field-label">Category *</label><select class="field-select" id="nm-category"><option>Urban Hub</option><option>Supermarket Hub</option><option>Transport Hub</option><option>Airport Hub</option><option>Stadium Hub</option></select></div>
+        <div class="form-group"><label class="field-label">Current Owner</label><input class="field-input" id="nm-owner" placeholder="UNCLAIMED or Brand Name"></div>
+        <div class="form-group"><label class="field-label">Monthly Value (R) *</label><input class="field-input" id="nm-value" type="number" placeholder="4500"></div>
+        <div class="form-group"><label class="field-label">Prestige Tier</label><select class="field-select" id="nm-prestige"><option>BRONZE</option><option>SILVER</option><option>GOLD</option><option>PLATINUM</option><option>ELITE</option><option>LEGENDARY</option></select></div>
+        <div class="form-group"><label class="field-label">Status</label><select class="field-select" id="nm-status"><option>AVAILABLE</option><option>FORTIFIED</option><option>TRENDING</option><option>UNDER ATTACK</option><option>HOT PROPERTY</option></select></div>
+        <div class="form-group"><label class="field-label">Attention Index (%)</label><input class="field-input" id="nm-ai" type="number" step="0.1" placeholder="97.8"></div>
+        <div class="form-group"><label class="field-label">Est. Reach</label><input class="field-input" id="nm-reach" placeholder="1.4M"></div>
+        <div class="form-group"><label class="field-label">Engagement</label><input class="field-input" id="nm-engage" placeholder="91%"></div>
+        <div class="form-group"><label class="field-label">Influence Radius</label><input class="field-input" id="nm-radius" placeholder="4.5 km"></div>
+        <div class="form-group"><label class="field-label">Threat Level (0–100)</label><input class="field-input" id="nm-threat" type="number" min="0" max="100" placeholder="12"></div>
+        <div class="form-group"><label class="field-label">Sort Order</label><input class="field-input" id="nm-sort" type="number" placeholder="1"></div>
+        <div class="form-group"><label class="field-label">Latitude</label><input class="field-input" id="nm-lat" type="number" step="any" placeholder="-26.1044"></div>
+        <div class="form-group"><label class="field-label">Longitude</label><input class="field-input" id="nm-lng" type="number" step="any" placeholder="28.0526"></div>
+        <div class="form-group full"><label class="field-label">Image URL</label><input class="field-input" id="nm-img" placeholder="https://... (leave blank for branded placeholder)"></div>
+        <div class="form-group full"><label class="field-label">Admin Notes (internal)</label><textarea class="field-textarea" id="nm-notes" placeholder="Internal notes about this node..."></textarea></div>
+        <div class="form-group"><label class="field-checkbox"><input type="checkbox" id="nm-active" checked> Node is Active (shown on frontend)</label></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('node-modal')">Cancel</button>
+      <button class="btn btn-gold" onclick="saveNode()">💾 SAVE NODE</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CATEGORY MODAL ═══ -->
+<div class="modal-overlay" id="cat-modal">
+  <div class="modal-box sm">
+    <div class="modal-head"><span class="modal-head-title" id="cat-modal-title">ADD CATEGORY</span><button class="modal-close" onclick="closeModal('cat-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group"><label class="field-label">Name *</label><input class="field-input" id="cm-name" placeholder="Urban Hub"></div>
+        <div class="form-group"><label class="field-label">Slug *</label><input class="field-input" id="cm-slug" placeholder="urban-hub"><div class="field-hint">Auto-generated from name</div></div>
+        <div class="form-group"><label class="field-label">Button Label *</label><input class="field-input" id="cm-label" placeholder="URBAN"><div class="field-hint">Short label for filter button</div></div>
+        <div class="form-group"><label class="field-label">Sort Order</label><input class="field-input" id="cm-sort" type="number" placeholder="1"></div>
+        <div class="form-group"><label class="field-checkbox"><input type="checkbox" id="cm-active" checked> Active</label></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal('cat-modal')">Cancel</button><button class="btn btn-gold" onclick="saveCat()">SAVE</button></div>
+  </div>
+</div>
+
+<!-- ═══ CHALLENGER MODAL ═══ -->
+<div class="modal-overlay" id="chal-modal">
+  <div class="modal-box sm">
+    <div class="modal-head"><span class="modal-head-title" id="chal-modal-title">ADD CHALLENGER</span><button class="modal-close" onclick="closeModal('chal-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group"><label class="field-label">Node *</label><select class="field-select" id="chal-node"></select></div>
+        <div class="form-group"><label class="field-label">Brand Name *</label><input class="field-input" id="chal-brand" placeholder="Vodacom Group"></div>
+        <div class="form-group"><label class="field-label">Bid Amount (R)</label><input class="field-input" id="chal-bid" type="number" placeholder="4200"></div>
+        <div class="form-group"><label class="field-label">Sort Order</label><input class="field-input" id="chal-sort" type="number" placeholder="1"></div>
+        <div class="form-group"><label class="field-checkbox"><input type="checkbox" id="chal-active" checked> Active</label></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal('chal-modal')">Cancel</button><button class="btn btn-gold" onclick="saveChallenger()">SAVE</button></div>
+  </div>
+</div>
+
+<!-- ═══ TICKER MODAL ═══ -->
+<div class="modal-overlay" id="ticker-modal">
+  <div class="modal-box sm">
+    <div class="modal-head"><span class="modal-head-title" id="ticker-modal-title">ADD TICKER MESSAGE</span><button class="modal-close" onclick="closeModal('ticker-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group full"><label class="field-label">Message *</label><textarea class="field-textarea" id="tm-msg" placeholder="MTN DEFENDED SANDTON FINANCIAL DISTRICT — R4,500/MO" style="min-height:55px"></textarea></div>
+        <div class="form-group"><label class="field-label">Color</label><select class="field-select" id="tm-color"><option value="cyan">Cyan</option><option value="gold">Gold</option><option value="green">Green</option><option value="red">Red</option><option value="white">White</option></select></div>
+        <div class="form-group"><label class="field-label">Sort Order</label><input class="field-input" id="tm-sort" type="number" placeholder="1"></div>
+        <div class="form-group"><label class="field-checkbox"><input type="checkbox" id="tm-active" checked> Active</label></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal('ticker-modal')">Cancel</button><button class="btn btn-gold" onclick="saveTicker()">SAVE</button></div>
+  </div>
+</div>
+
+<!-- ═══ TIER MODAL ═══ -->
+<div class="modal-overlay" id="tier-modal">
+  <div class="modal-box sm">
+    <div class="modal-head"><span class="modal-head-title" id="tier-modal-title">ADD TIER</span><button class="modal-close" onclick="closeModal('tier-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid cols2">
+        <div class="form-group"><label class="field-label">Name *</label><input class="field-input" id="tier-name" placeholder="LEGENDARY"></div>
+        <div class="form-group"><label class="field-label">Min Value (R)</label><input class="field-input" id="tier-min" type="number" placeholder="8000"></div>
+        <div class="form-group"><label class="field-label">Text Color</label><input class="field-input" id="tier-color" placeholder="#FF3D57"></div>
+        <div class="form-group"><label class="field-label">BG Color</label><input class="field-input" id="tier-bg" placeholder="rgba(255,61,87,0.15)"></div>
+        <div class="form-group"><label class="field-label">Border Color</label><input class="field-input" id="tier-border" placeholder="rgba(255,61,87,0.25)"></div>
+        <div class="form-group"><label class="field-label">Sort Order</label><input class="field-input" id="tier-sort" type="number" placeholder="6"></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal('tier-modal')">Cancel</button><button class="btn btn-gold" onclick="saveTier()">SAVE</button></div>
+  </div>
+</div>
+
+<!-- BID NOTES MODAL -->
+<div class="modal-overlay" id="bid-modal">
+  <div class="modal-box sm">
+    <div class="modal-head"><span class="modal-head-title">UPDATE BID STATUS</span><button class="modal-close" onclick="closeModal('bid-modal')">✕</button></div>
+    <div class="modal-body">
+      <div id="bid-modal-info" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:12px;font-size:12px;"></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="field-label">New Status</label><select class="field-select" id="bid-new-status"><option>PENDING</option><option>APPROVED</option><option>REJECTED</option><option>INVOICED</option></select></div>
+        <div class="form-group full"><label class="field-label">Admin Notes</label><textarea class="field-textarea" id="bid-notes" placeholder="Internal notes..."></textarea></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal('bid-modal')">Cancel</button><button class="btn btn-gold" onclick="saveBidStatus()">UPDATE</button></div>
+  </div>
+</div>
+
+<script>
+const { createClient } = supabase;
+let sb = null;
+let editingNodeId = null;
+let editingId = {};
+let configData = {};
+let nodesCache = [];
+
+// ── AUTH ──
+async function doLogin() {
+  const url = document.getElementById('auth-url').value.trim();
+  const anon = document.getElementById('auth-anon').value.trim();
+  const service = document.getElementById('auth-service').value.trim();
+  const pw = document.getElementById('auth-pw').value.trim();
+  const errEl = document.getElementById('auth-err');
+  errEl.style.display = 'none';
+  if (!url || !anon || !service || !pw) { showErr('All fields required.'); return; }
+  try {
+    sb = createClient(url, service); // Use service role key for admin
+    // Verify connection and password
+    const { data, error } = await sb.from('tx_config').select('value').eq('key','admin_password').single();
+    if (error) throw error;
+    if (data.value !== pw) { showErr('Wrong admin password.'); sb=null; return; }
+    sessionStorage.setItem('tx_url', url);
+    sessionStorage.setItem('tx_anon', anon);
+    sessionStorage.setItem('tx_service', service);
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'grid';
+    document.getElementById('tb-url').textContent = url.replace('https://','').split('.')[0] + '.supabase.co';
+    init();
+  } catch(e) { showErr('Connection failed: ' + e.message); }
+}
+function showErr(msg) { const e=document.getElementById('auth-err'); e.textContent=msg; e.style.display='block'; }
+function doLogout() { sessionStorage.clear(); location.reload(); }
+
+// Restore session
+window.onload = function() {
+  const url=sessionStorage.getItem('tx_url'), service=sessionStorage.getItem('tx_service');
+  if (url && service) {
+    document.getElementById('auth-url').value=url;
+    document.getElementById('auth-anon').value=sessionStorage.getItem('tx_anon')||'';
+    document.getElementById('auth-service').value=service;
+  }
+};
+
+async function init() {
+  await loadDashboard();
+  await loadCategoriesForSelects();
+  await loadNodesForSelects();
+}
+
+// ── NAVIGATION ──
+function showPage(page) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  event.currentTarget.classList.add('active');
+  const loaders = {nodes:loadNodes, bids:loadBids, config:loadConfig, categories:loadCategories, challengers:loadChallengers, ticker:loadTicker, tiers:loadTiers};
+  if (loaders[page]) loaders[page]();
+}
+
+// ── TOAST ──
+function toast(msg, type='info') {
+  const t=document.createElement('div');
+  t.className=`toast-item ${type}`;
+  t.innerHTML=`<span>${type==='success'?'✓':type==='error'?'✕':'ℹ'}</span> ${msg}`;
+  document.getElementById('toast').appendChild(t);
+  setTimeout(()=>t.remove(),3500);
+}
+
+// ── MODALS ──
+function openModal(id){document.getElementById(id).classList.add('open')}
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+
+// ── DASHBOARD ──
+async function loadDashboard() {
+  const {data:stats} = await sb.from('tx_dashboard_stats').select('*').single();
+  if (stats) {
+    document.getElementById('s-nodes').textContent = stats.total_nodes;
+    document.getElementById('s-claimed').textContent = stats.claimed_nodes;
+    document.getElementById('s-avail').textContent = `${stats.available_nodes} open`;
+    document.getElementById('s-value').textContent = `R${Number(stats.total_monthly_value).toLocaleString()}`;
+    document.getElementById('s-bids').textContent = stats.pending_bids;
+    document.getElementById('s-bids-sub').textContent = `${stats.total_bids} total bids`;
+    const badge=document.getElementById('nav-bid-badge');
+    if(stats.pending_bids>0){badge.textContent=stats.pending_bids;badge.style.display='inline-flex';}
+  }
+  const {data:bids}=await sb.from('tx_bids').select('*').order('created_at',{ascending:false}).limit(5);
+  const bTbody=document.getElementById('dash-bids');
+  bTbody.innerHTML=(bids||[]).map(b=>`<tr>
+    <td class="td-trunc">${b.brand_name}</td>
+    <td class="td-trunc td-muted">${b.node_name||b.node_id}</td>
+    <td class="td-gold">R${b.proposed_amount.toLocaleString()}</td>
+    <td>${bidBadge(b.status)}</td>
+  </tr>`).join('')||`<tr><td colspan="4" class="empty-state">No bids yet</td></tr>`;
+  const {data:nodes}=await sb.from('tx_nodes').select('name,owner,value,threat').eq('is_active',true).order('value',{ascending:false}).limit(5);
+  document.getElementById('dash-nodes').innerHTML=(nodes||[]).map(n=>`<tr>
+    <td class="td-trunc" style="font-weight:600">${n.name}</td>
+    <td class="td-trunc td-muted">${n.owner}</td>
+    <td class="td-gold">R${n.value.toLocaleString()}</td>
+    <td><span style="color:${n.threat>=70?'#FF3D57':n.threat>=40?'#FFB800':'#00FF95'};font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700">${n.threat}%</span></td>
+  </tr>`).join('');
+}
+
+// ── NODES ──
+async function loadNodes() {
+  const {data}=await sb.from('tx_nodes').select('*').order('sort_order').order('created_at');
+  nodesCache=data||[];
+  document.getElementById('nav-node-count').textContent=nodesCache.length;
+  document.getElementById('nav-node-count').style.display='inline-flex';
+  await loadCategoriesForFilter();
+  renderNodesTable();
+}
+
+function renderNodesTable() {
+  const search=document.getElementById('node-search').value.toLowerCase();
+  const statusF=document.getElementById('node-filter-status').value;
+  const catF=document.getElementById('node-filter-cat').value;
+  const filtered=nodesCache.filter(n=>
+    (!search||(n.name+n.owner+n.id).toLowerCase().includes(search))&&
+    (!statusF||n.status===statusF)&&
+    (!catF||n.category_name===catF)
+  );
+  document.getElementById('nodes-tbody').innerHTML=filtered.map(n=>`<tr>
+    <td class="td-mono" style="font-size:10px;color:var(--muted)">${n.id}</td>
+    <td style="font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n.name}</td>
+    <td class="td-muted" style="font-size:11px">${n.category_name}</td>
+    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px">${n.owner}</td>
+    <td class="td-gold">R${n.value.toLocaleString()}</td>
+    <td>${prestigeBadge(n.prestige)}</td>
+    <td>${statusBadge(n.status)}</td>
+    <td><span style="color:${n.threat>=70?'#FF3D57':n.threat>=40?'#FFB800':'#00FF95'};font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700">${n.threat}%</span></td>
+    <td><span class="badge ${n.is_active?'badge-green':'badge-muted'}">${n.is_active?'YES':'NO'}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="editNode('${n.id}')">✏ Edit</button>
+      <button class="btn btn-red btn-sm" onclick="deleteNode('${n.id}',\`${n.name.replace(/`/g,"'")}\`)">✕</button>
+    </td>
+  </tr>`).join('')||`<tr><td colspan="10"><div class="empty-state"><div class="empty-icon">📍</div>No nodes found</div></td></tr>`;
+}
+
+function openNodeModal(id=null) {
+  editingNodeId=id;
+  document.getElementById('node-modal-title').textContent=id?'EDIT NODE':'ADD NODE';
+  const fields=['id','name','sector','country','city','owner','notes','img'];
+  const nums=['value','ai','threat','sort','lat','lng'];
+  fields.forEach(f=>document.getElementById('nm-'+f).value='');
+  nums.forEach(f=>document.getElementById('nm-'+f).value='');
+  document.getElementById('nm-active').checked=true;
+  document.getElementById('nm-owner').value='UNCLAIMED';
+  document.getElementById('nm-status').value='AVAILABLE';
+  document.getElementById('nm-prestige').value='BRONZE';
+  document.getElementById('nm-reach').value='';
+  document.getElementById('nm-engage').value='';
+  document.getElementById('nm-radius').value='';
+  if (id) {
+    const n=nodesCache.find(x=>x.id===id);
+    if(!n)return;
+    document.getElementById('nm-id').value=n.id;
+    document.getElementById('nm-id').disabled=true;
+    document.getElementById('nm-name').value=n.name;
+    document.getElementById('nm-sector').value=n.sector;
+    document.getElementById('nm-country').value=n.country;
+    document.getElementById('nm-city').value=n.city||'';
+    document.getElementById('nm-category').value=n.category_name;
+    document.getElementById('nm-owner').value=n.owner;
+    document.getElementById('nm-value').value=n.value;
+    document.getElementById('nm-prestige').value=n.prestige;
+    document.getElementById('nm-status').value=n.status;
+    document.getElementById('nm-ai').value=n.attention_index;
+    document.getElementById('nm-reach').value=n.est_reach;
+    document.getElementById('nm-engage').value=n.engagement;
+    document.getElementById('nm-radius').value=n.radius;
+    document.getElementById('nm-threat').value=n.threat;
+    document.getElementById('nm-sort').value=n.sort_order;
+    document.getElementById('nm-lat').value=n.lat||'';
+    document.getElementById('nm-lng').value=n.lng||'';
+    document.getElementById('nm-img').value=n.image_url||'';
+    document.getElementById('nm-notes').value=n.notes||'';
+    document.getElementById('nm-active').checked=n.is_active;
+  } else { document.getElementById('nm-id').disabled=false; }
+  openModal('node-modal');
+}
+
+async function saveNode() {
+  const id=document.getElementById('nm-id').value.trim().toLowerCase().replace(/\s+/g,'-');
+  if(!id||!document.getElementById('nm-name').value.trim()||!document.getElementById('nm-value').value) { toast('Fill required fields','error'); return; }
+  const payload={
+    name:document.getElementById('nm-name').value.trim().toUpperCase(),
+    sector:document.getElementById('nm-sector').value.trim().toUpperCase(),
+    country:document.getElementById('nm-country').value.trim(),
+    city:document.getElementById('nm-city').value.trim(),
+    category_name:document.getElementById('nm-category').value,
+    owner:document.getElementById('nm-owner').value.trim()||'UNCLAIMED',
+    value:parseInt(document.getElementById('nm-value').value)||0,
+    prestige:document.getElementById('nm-prestige').value,
+    status:document.getElementById('nm-status').value,
+    attention_index:parseFloat(document.getElementById('nm-ai').value)||0,
+    est_reach:document.getElementById('nm-reach').value||'0',
+    engagement:document.getElementById('nm-engage').value||'0%',
+    radius:document.getElementById('nm-radius').value||'0 km',
+    threat:parseInt(document.getElementById('nm-threat').value)||0,
+    sort_order:parseInt(document.getElementById('nm-sort').value)||0,
+    lat:parseFloat(document.getElementById('nm-lat').value)||null,
+    lng:parseFloat(document.getElementById('nm-lng').value)||null,
+    image_url:document.getElementById('nm-img').value.trim(),
+    notes:document.getElementById('nm-notes').value.trim(),
+    is_active:document.getElementById('nm-active').checked,
+  };
+  let err;
+  if(editingNodeId) { ({error:err}=await sb.from('tx_nodes').update(payload).eq('id',editingNodeId)); }
+  else { ({error:err}=await sb.from('tx_nodes').insert({...payload,id})); }
+  if(err){toast('Error: '+err.message,'error');return;}
+  toast(editingNodeId?'Node updated!':'Node added!','success');
+  closeModal('node-modal');
+  loadNodes();
+}
+
+function editNode(id){openNodeModal(id)}
+
+async function deleteNode(id,name) {
+  if(!confirm(`Delete "${name}"? This also removes all challengers for this node.`))return;
+  const {error}=await sb.from('tx_nodes').delete().eq('id',id);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast('Node deleted','success');
+  loadNodes();
+}
+
+// ── BIDS ──
+async function loadBids() {
+  const f=document.getElementById('bid-filter').value;
+  let q=sb.from('tx_bids').select('*').order('created_at',{ascending:false}).limit(100);
+  if(f)q=q.eq('status',f);
+  const {data}=await q;
+  document.getElementById('bids-tbody').innerHTML=(data||[]).map(b=>`<tr>
+    <td class="td-mono" style="font-size:10px;color:var(--muted)">${new Date(b.created_at).toLocaleDateString()}<br><span style="font-size:9px">${new Date(b.created_at).toLocaleTimeString()}</span></td>
+    <td style="font-weight:600">${b.brand_name}</td>
+    <td style="font-size:11px"><div>${b.contact_name}</div><div class="td-muted" style="font-size:10px">${b.contact_phone}</div></td>
+    <td class="td-muted" style="font-size:11px">${b.node_name||b.node_id}</td>
+    <td class="td-gold">R${b.proposed_amount.toLocaleString()}</td>
+    <td class="td-muted">R${b.current_value.toLocaleString()}</td>
+    <td>${bidBadge(b.status)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="openBidModal('${b.id}','${b.brand_name.replace(/'/g,"\\'")}','${b.node_name||b.node_id}','${b.proposed_amount}','${b.status}','${(b.admin_notes||'').replace(/'/g,"\\'")}')">✏ Update</button>
+      <a href="https://api.whatsapp.com/send?phone=${b.contact_phone.replace(/\D/g,'')}&text=${encodeURIComponent('TerritoryX Bid Update\n---\nBrand: '+b.brand_name+'\nNode: '+(b.node_name||b.node_id)+'\nBid: R'+b.proposed_amount+'\nStatus: APPROVED\nWe will contact you with the invoice.')}" target="_blank" class="btn btn-green btn-sm">📱 WA</a>
+    </td>
+  </tr>`).join('')||`<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">⚔️</div>No bids yet</div></td></tr>`;
+}
+
+let editingBidId=null;
+function openBidModal(id,brand,node,amount,status,notes) {
+  editingBidId=id;
+  document.getElementById('bid-modal-info').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><div style="font-size:9px;color:var(--muted);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;margin-bottom:2px">Brand</div><div style="font-weight:700">${brand}</div></div><div><div style="font-size:9px;color:var(--muted);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;margin-bottom:2px">Node</div><div>${node}</div></div><div><div style="font-size:9px;color:var(--muted);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;margin-bottom:2px">Bid Amount</div><div style="color:#FFB800;font-weight:700;font-family:'IBM Plex Mono',monospace">R${parseInt(amount).toLocaleString()}</div></div></div>`;
+  document.getElementById('bid-new-status').value=status;
+  document.getElementById('bid-notes').value=notes||'';
+  openModal('bid-modal');
+}
+async function saveBidStatus() {
+  const {error}=await sb.from('tx_bids').update({status:document.getElementById('bid-new-status').value,admin_notes:document.getElementById('bid-notes').value}).eq('id',editingBidId);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast('Bid updated','success');
+  closeModal('bid-modal');
+  loadBids();
+  loadDashboard();
+}
+
+// ── CONFIG ──
+async function loadConfig() {
+  const {data}=await sb.from('tx_config').select('*').order('category').order('key');
+  if(!data)return;
+  configData={};
+  data.forEach(r=>configData[r.key]=r);
+  renderConfig(data);
+}
+
+function renderConfig(rows) {
+  const cats=[...new Set(rows.map(r=>r.category))];
+  document.getElementById('config-form').innerHTML=cats.map(cat=>`
+    <div class="config-section">
+      <div class="config-section-title">⚙ ${cat.toUpperCase()}</div>
+      <div class="form-grid cols2">
+        ${rows.filter(r=>r.category===cat).map(r=>`
+          <div class="form-group ${r.type==='textarea'?'full':''}">
+            <label class="field-label">${r.label}</label>
+            ${r.type==='textarea'
+              ? `<textarea class="field-textarea" id="cfg-${r.key}" style="min-height:55px">${r.value}</textarea>`
+              : r.type==='boolean'
+              ? `<label class="field-checkbox" style="margin-top:4px"><input type="checkbox" id="cfg-${r.key}" ${r.value==='true'?'checked':''}> ${r.description}</label>`
+              : `<input class="field-input" type="${r.type==='number'?'number':'text'}" id="cfg-${r.key}" value="${r.value}">`
+            }
+            ${r.description&&r.type!=='boolean'?`<div class="field-hint">${r.description}</div>`:''}
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+async function saveConfig() {
+  const updates=[];
+  for(const key in configData) {
+    const el=document.getElementById('cfg-'+key);
+    if(!el)continue;
+    const val=configData[key].type==='boolean'?String(el.checked):el.value;
+    updates.push(sb.from('tx_config').update({value:val}).eq('key',key));
+  }
+  await Promise.all(updates);
+  toast('Config saved successfully!','success');
+}
+
+// ── CATEGORIES ──
+async function loadCategories() {
+  const {data}=await sb.from('tx_categories').select('*').order('sort_order');
+  document.getElementById('cats-tbody').innerHTML=(data||[]).map(c=>`<tr>
+    <td style="font-weight:600">${c.name}</td>
+    <td class="td-mono td-muted" style="font-size:11px">${c.slug}</td>
+    <td><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;background:rgba(0,229,255,0.1);color:#00E5FF;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,229,255,0.2)">${c.label}</span></td>
+    <td class="td-muted">${c.sort_order}</td>
+    <td><span class="badge ${c.is_active?'badge-green':'badge-muted'}">${c.is_active?'YES':'NO'}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="editCat('${c.id}','${c.name}','${c.slug}','${c.label}',${c.sort_order},${c.is_active})">✏ Edit</button>
+      <button class="btn btn-red btn-sm" onclick="deleteCat('${c.id}','${c.name}')">✕</button>
+    </td>
+  </tr>`).join('');
+}
+
+function openCatModal(){editingId.cat=null;document.getElementById('cat-modal-title').textContent='ADD CATEGORY';['cm-name','cm-slug','cm-label'].forEach(f=>document.getElementById(f).value='');document.getElementById('cm-sort').value='1';document.getElementById('cm-active').checked=true;openModal('cat-modal');}
+function editCat(id,name,slug,label,sort,active){editingId.cat=id;document.getElementById('cat-modal-title').textContent='EDIT CATEGORY';document.getElementById('cm-name').value=name;document.getElementById('cm-slug').value=slug;document.getElementById('cm-label').value=label;document.getElementById('cm-sort').value=sort;document.getElementById('cm-active').checked=active;openModal('cat-modal');}
+document.getElementById&&document.getElementById('cm-name')&&document.getElementById('cm-name').addEventListener('input',function(){if(!editingId.cat)document.getElementById('cm-slug').value=this.value.toLowerCase().replace(/\s+/g,'-');});
+async function saveCat(){
+  const payload={name:document.getElementById('cm-name').value.trim(),slug:document.getElementById('cm-slug').value.trim(),label:document.getElementById('cm-label').value.trim().toUpperCase(),sort_order:parseInt(document.getElementById('cm-sort').value)||0,is_active:document.getElementById('cm-active').checked};
+  if(!payload.name||!payload.slug||!payload.label){toast('Fill required fields','error');return;}
+  const {error}=editingId.cat?await sb.from('tx_categories').update(payload).eq('id',editingId.cat):await sb.from('tx_categories').insert(payload);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast(editingId.cat?'Category updated':'Category added','success');closeModal('cat-modal');loadCategories();loadCategoriesForSelects();
+}
+async function deleteCat(id,name){if(!confirm(`Delete category "${name}"?`))return;const{error}=await sb.from('tx_categories').delete().eq('id',id);if(error){toast('Error: '+error.message,'error');return;}toast('Deleted','success');loadCategories();}
+
+// ── CHALLENGERS ──
+async function loadChallengers() {
+  const nodeF=document.getElementById('chal-filter-node').value;
+  let q=sb.from('tx_challengers').select('*,tx_nodes(name)').order('node_id').order('sort_order');
+  if(nodeF)q=q.eq('node_id',nodeF);
+  const {data}=await q;
+  document.getElementById('chals-tbody').innerHTML=(data||[]).map(c=>`<tr>
+    <td class="td-muted" style="font-size:11px">${c.tx_nodes?.name||c.node_id}</td>
+    <td style="font-weight:600">${c.brand_name}</td>
+    <td class="td-gold">${c.bid_amount?'R'+c.bid_amount.toLocaleString():'—'}</td>
+    <td class="td-muted">${c.sort_order}</td>
+    <td><span class="badge ${c.is_active?'badge-green':'badge-muted'}">${c.is_active?'YES':'NO'}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="editChal('${c.id}','${c.node_id}','${c.brand_name.replace(/'/g,"\\'")}',${c.bid_amount||0},${c.sort_order},${c.is_active})">✏ Edit</button>
+      <button class="btn btn-red btn-sm" onclick="deleteChal('${c.id}','${c.brand_name.replace(/'/g,"\\'")}')">✕</button>
+    </td>
+  </tr>`).join('')||`<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🥊</div>No challengers</div></td></tr>`;
+}
+
+function openChalModal(){editingId.chal=null;document.getElementById('chal-modal-title').textContent='ADD CHALLENGER';['chal-brand'].forEach(f=>document.getElementById(f).value='');document.getElementById('chal-bid').value='';document.getElementById('chal-sort').value='1';document.getElementById('chal-active').checked=true;openModal('chal-modal');}
+function editChal(id,nodeId,brand,bid,sort,active){editingId.chal=id;document.getElementById('chal-modal-title').textContent='EDIT CHALLENGER';document.getElementById('chal-node').value=nodeId;document.getElementById('chal-brand').value=brand;document.getElementById('chal-bid').value=bid||'';document.getElementById('chal-sort').value=sort;document.getElementById('chal-active').checked=active;openModal('chal-modal');}
+async function saveChallenger(){
+  const payload={node_id:document.getElementById('chal-node').value,brand_name:document.getElementById('chal-brand').value.trim(),bid_amount:parseInt(document.getElementById('chal-bid').value)||null,sort_order:parseInt(document.getElementById('chal-sort').value)||0,is_active:document.getElementById('chal-active').checked};
+  if(!payload.node_id||!payload.brand_name){toast('Fill required fields','error');return;}
+  const {error}=editingId.chal?await sb.from('tx_challengers').update(payload).eq('id',editingId.chal):await sb.from('tx_challengers').insert(payload);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast(editingId.chal?'Challenger updated':'Challenger added','success');closeModal('chal-modal');loadChallengers();
+}
+async function deleteChal(id,name){if(!confirm(`Delete challenger "${name}"?`))return;const{error}=await sb.from('tx_challengers').delete().eq('id',id);if(error){toast('Error: '+error.message,'error');return;}toast('Deleted','success');loadChallengers();}
+
+// ── TICKER ──
+async function loadTicker(){
+  const{data}=await sb.from('tx_ticker').select('*').order('sort_order');
+  const colorMap={cyan:'#00E5FF',gold:'#FFB800',green:'#00FF95',red:'#FF3D57',white:'#E2E8F0'};
+  document.getElementById('ticker-list').innerHTML=(data||[]).map(t=>`
+    <div class="ticker-row">
+      <div class="color-dot" style="background:${colorMap[t.color]||'#00E5FF'}"></div>
+      <span style="flex:1;font-size:11px;font-family:'IBM Plex Mono',monospace;color:${colorMap[t.color]||'#00E5FF'}">${t.message}</span>
+      <span class="badge ${t.is_active?'badge-green':'badge-muted'}" style="margin-right:8px">${t.is_active?'LIVE':'OFF'}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-right:8px">#${t.sort_order}</span>
+      <button class="btn btn-ghost btn-sm" onclick="editTicker('${t.id}','${t.message.replace(/'/g,"\\'")}','${t.color}',${t.sort_order},${t.is_active})">✏</button>
+      <button class="btn btn-red btn-sm" onclick="deleteTicker('${t.id}')">✕</button>
+    </div>`).join('')||`<div class="empty-state"><div class="empty-icon">📡</div>No ticker messages</div>`;
+}
+
+function openTickerModal(){editingId.ticker=null;document.getElementById('ticker-modal-title').textContent='ADD TICKER MESSAGE';document.getElementById('tm-msg').value='';document.getElementById('tm-color').value='cyan';document.getElementById('tm-sort').value='1';document.getElementById('tm-active').checked=true;openModal('ticker-modal');}
+function editTicker(id,msg,color,sort,active){editingId.ticker=id;document.getElementById('ticker-modal-title').textContent='EDIT MESSAGE';document.getElementById('tm-msg').value=msg;document.getElementById('tm-color').value=color;document.getElementById('tm-sort').value=sort;document.getElementById('tm-active').checked=active;openModal('ticker-modal');}
+async function saveTicker(){
+  const payload={message:document.getElementById('tm-msg').value.trim(),color:document.getElementById('tm-color').value,sort_order:parseInt(document.getElementById('tm-sort').value)||0,is_active:document.getElementById('tm-active').checked};
+  if(!payload.message){toast('Message required','error');return;}
+  const{error}=editingId.ticker?await sb.from('tx_ticker').update(payload).eq('id',editingId.ticker):await sb.from('tx_ticker').insert(payload);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast(editingId.ticker?'Message updated':'Message added','success');closeModal('ticker-modal');loadTicker();
+}
+async function deleteTicker(id){if(!confirm('Delete this message?'))return;const{error}=await sb.from('tx_ticker').delete().eq('id',id);if(error){toast('Error','error');return;}toast('Deleted','success');loadTicker();}
+
+// ── TIERS ──
+async function loadTiers(){
+  const{data}=await sb.from('tx_prestige_tiers').select('*').order('sort_order');
+  document.getElementById('tiers-tbody').innerHTML=(data||[]).map(t=>`<tr>
+    <td style="font-weight:700">${t.name}</td>
+    <td class="td-muted">R${(t.min_value||0).toLocaleString()}+</td>
+    <td class="td-mono" style="font-size:10px;color:var(--muted)">${t.color}</td>
+    <td><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;background:${t.bg_color};color:${t.color};border:1px solid ${t.border_color}">${t.name}</span></td>
+    <td class="td-muted">${t.sort_order}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="editTier('${t.id}','${t.name}',${t.min_value||0},'${t.color}','${t.bg_color}','${t.border_color}',${t.sort_order})">✏ Edit</button>
+      <button class="btn btn-red btn-sm" onclick="deleteTier('${t.id}','${t.name}')">✕</button>
+    </td>
+  </tr>`).join('');
+}
+function openTierModal(){editingId.tier=null;['tier-name','tier-color','tier-bg','tier-border'].forEach(f=>document.getElementById(f).value='');document.getElementById('tier-min').value=0;document.getElementById('tier-sort').value=1;openModal('tier-modal');}
+function editTier(id,name,min,color,bg,border,sort){editingId.tier=id;document.getElementById('tier-name').value=name;document.getElementById('tier-min').value=min;document.getElementById('tier-color').value=color;document.getElementById('tier-bg').value=bg;document.getElementById('tier-border').value=border;document.getElementById('tier-sort').value=sort;openModal('tier-modal');}
+async function saveTier(){
+  const payload={name:document.getElementById('tier-name').value.trim().toUpperCase(),min_value:parseInt(document.getElementById('tier-min').value)||0,color:document.getElementById('tier-color').value.trim(),bg_color:document.getElementById('tier-bg').value.trim(),border_color:document.getElementById('tier-border').value.trim(),sort_order:parseInt(document.getElementById('tier-sort').value)||0};
+  if(!payload.name){toast('Name required','error');return;}
+  const{error}=editingId.tier?await sb.from('tx_prestige_tiers').update(payload).eq('id',editingId.tier):await sb.from('tx_prestige_tiers').insert(payload);
+  if(error){toast('Error: '+error.message,'error');return;}
+  toast(editingId.tier?'Tier updated':'Tier added','success');closeModal('tier-modal');loadTiers();
+}
+async function deleteTier(id,name){if(!confirm(`Delete tier "${name}"?`))return;const{error}=await sb.from('tx_prestige_tiers').delete().eq('id',id);if(error){toast('Error','error');return;}toast('Deleted','success');loadTiers();}
+
+// ── HELPERS ──
+async function loadCategoriesForSelects(){
+  const{data}=await sb.from('tx_categories').select('name,slug').eq('is_active',true).order('sort_order');
+  const cats=data||[];
+  // Node modal category select
+  const nmCat=document.getElementById('nm-category');
+  nmCat.innerHTML=cats.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+  // Challenger node filter
+  const cmName=document.getElementById('cm-name');
+  if(cmName)cmName.addEventListener('input',function(){if(!editingId.cat)document.getElementById('cm-slug').value=this.value.toLowerCase().replace(/\s+/g,'-');});
+}
+
+async function loadNodesForSelects(){
+  const{data}=await sb.from('tx_nodes').select('id,name').eq('is_active',true).order('sort_order');
+  const nodes=data||[];
+  const chalNode=document.getElementById('chal-node');
+  const chalFilter=document.getElementById('chal-filter-node');
+  const opts=nodes.map(n=>`<option value="${n.id}">${n.name}</option>`).join('');
+  chalNode.innerHTML=opts;
+  chalFilter.innerHTML='<option value="">All Nodes</option>'+opts;
+}
+
+async function loadCategoriesForFilter(){
+  const cats=[...new Set(nodesCache.map(n=>n.category_name))];
+  document.getElementById('node-filter-cat').innerHTML='<option value="">All Categories</option>'+cats.map(c=>`<option>${c}</option>`).join('');
+}
+
+function statusBadge(s){
+  const m={AVAILABLE:'badge-green',FORTIFIED:'badge-cyan',TRENDING:'badge-gold','UNDER ATTACK':'badge-red','HOT PROPERTY':'badge-gold'};
+  return `<span class="badge ${m[s]||'badge-muted'}">${s}</span>`;
+}
+function prestigeBadge(p){
+  const m={LEGENDARY:'badge-red',ELITE:'badge-gold',PLATINUM:'badge-cyan',GOLD:'badge-gold',SILVER:'badge-muted',BRONZE:'badge-muted'};
+  return `<span class="badge ${m[p]||'badge-muted'}">${p}</span>`;
+}
+function bidBadge(s){
+  const m={PENDING:'badge-gold',APPROVED:'badge-green',REJECTED:'badge-red',INVOICED:'badge-cyan'};
+  return `<span class="badge ${m[s]||'badge-muted'}">${s}</span>`;
+}
+</script>
+</body>
+</html>
